@@ -56,6 +56,7 @@ def draw_assembly(parts: list[Trimesh],
         elif part_states[part_id] == 2:
             color = [0.0, 0.0, 0.0]
         else:
+            color = [1.0, 1.0, 1.0]
             enabled = False
 
         # faces

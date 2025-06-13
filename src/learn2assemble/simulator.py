@@ -215,6 +215,7 @@ if __name__ == '__main__':
     part_states[0, 0] = 2
     part_states[0, 3] = 1
     part_states[0, 5] = 1
+
     settings = {
         "contact_settings":{
             "shrink_ratio": 0.1,
@@ -227,9 +228,10 @@ if __name__ == '__main__':
             "verbose": False,
         },
         "admm": {
+            "Ccp": 1E6,
             "evaluate_it": 200,
             "max_iter": 3000,
-            "float_type": torch.float64,
+            "float_type": torch.float32,
         }
     }
 

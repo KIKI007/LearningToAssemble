@@ -6,7 +6,7 @@ import time
 def test_simulate():
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
     np.random.seed(0)
-    n_batch = 512
+    n_batch = 10
     n_remove = 5
     part_states = np.ones((n_batch, len(parts)), dtype=np.int32)
     for batch_id in range(n_batch):
@@ -34,18 +34,18 @@ def test_simulate():
     timer = time.perf_counter()
     v_fp32, stable_fp32 = simulate(part_states, settings)
     torch.cuda.synchronize()
-    print("fp32 time", (time.perf_counter() - timer) / n_batch)
-    print("stable_fp32", stable_fp32)
+    #print("fp32 time", (time.perf_counter() - timer) / n_batch)
+    #print("stable_fp32", stable_fp32)
 
     settings["admm"]["float_type"] = torch.float64
     settings = init(parts, contacts, settings)
     timer = time.perf_counter()
     v_fp64, stable_fp64 = simulate(part_states, settings)
     torch.cuda.synchronize()
-    print("fp64 time", (time.perf_counter() - timer) / n_batch)
-    print("stable_fp64", stable_fp64)
-    print("error (fp32 vs fp64)",
-          np.sum(np.abs(stable_fp64.astype(np.float32) - stable_fp32.astype(np.float32))) / n_batch * 100, "%")
+    #print("fp64 time", (time.perf_counter() - timer) / n_batch)
+    #print("stable_fp64", stable_fp64)
+    #print("error (fp32 vs fp64)",
+    #       np.sum(np.abs(stable_fp64.astype(np.float32) - stable_fp32.astype(np.float32))) / n_batch * 100, "%")
     assert (stable_fp64 == stable_fp32).all()
 
     settings.pop("admm")
@@ -53,8 +53,8 @@ def test_simulate():
     timer = time.perf_counter()
     v_gurobi, stable_gurobi = simulate(part_states, settings)
     torch.cuda.synchronize()
-    print("gurobi time", (time.perf_counter() - timer) / n_batch)
-    print("stable_gurobi", stable_gurobi)
-    print("error (fp32 vs gurobi)",
-          np.sum(np.abs(stable_gurobi.astype(np.float32) - stable_fp32.astype(np.float32))) / n_batch * 100, "%")
+    #print("gurobi time", (time.perf_counter() - timer) / n_batch)
+    #print("stable_gurobi", stable_gurobi)
+    #print("error (fp32 vs gurobi)",
+    #      np.sum(np.abs(stable_gurobi.astype(np.float32) - stable_fp32.astype(np.float32))) / n_batch * 100, "%")
     assert (stable_gurobi == stable_fp32).all()

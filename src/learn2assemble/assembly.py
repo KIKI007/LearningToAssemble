@@ -7,16 +7,45 @@ import numpy as np
 import shapely
 from shapely.geometry import MultiPoint
 from shapely.geometry import Polygon
+from shapely import geometry
+from types import SimpleNamespace
+
+from learn2assemble import set_default
+
+def shrink_or_swell_shapely_polygon(my_polygon, factor=0.10, swell=False):
+    ''' returns the shapely polygon which is smaller or bigger by passed factor.
+        If swell = True , then it returns bigger polygon, else smaller '''
+
+    if isinstance(my_polygon, Polygon):
+        xs = list(my_polygon.exterior.coords.xy[0])
+        ys = list(my_polygon.exterior.coords.xy[1])
+        if len(xs) > 0:
+            x_center = 0.5 * min(xs) + 0.5 * max(xs)
+            y_center = 0.5 * min(ys) + 0.5 * max(ys)
+            min_corner = geometry.Point(min(xs), min(ys))
+            max_corner = geometry.Point(max(xs), max(ys))
+            center = geometry.Point(x_center, y_center)
+            shrink_distance = center.distance(min_corner) * factor
+
+            if swell:
+                my_polygon_resized = my_polygon.buffer(shrink_distance)  # expand
+            else:
+                my_polygon_resized = my_polygon.buffer(-shrink_distance)  # shrink
+            return my_polygon_resized
+
+    return my_polygon
 
 def compute_contacts_between_two_parts(partA: Trimesh,
                                        partB: Trimesh,
-                                       dist_tol=1E-3,
-                                       nrm_tol=1E-3,
-                                       area_tol=1E-5,
-                                       simplify_tol=1E-4):
+                                       dist_tol: float = 1E-3,
+                                       nrm_tol: float = 1E-3,
+                                       area_tol: float = 1E-5,
+                                       simplify_tol: float = 1E-4,
+                                       shrink_ratio: float = 0.0):
+
     def angle(nA, nB):
         return np.arccos(
-            np.clip(a = np.dot(nA, nB), a_min = -1.0, a_max = 1.0))
+            np.clip(a=np.dot(nA, nB), a_min=-1.0, a_max=1.0))
 
     def from_shapely_to_numpy(data, simplify_tol):
         if isinstance(data, Polygon):
@@ -41,7 +70,8 @@ def compute_contacts_between_two_parts(partA: Trimesh,
                 face_contact_points = trimesh.transformations.transform_points(project_face_contact_points,
                                                                                np.linalg.inv(projection))
                 project_face_contact_points = trimesh.transformations.transform_points(face_contact_points,
-                                                                               np.linalg.inv(contact["inv_proj"]))
+                                                                                       np.linalg.inv(
+                                                                                           contact["inv_proj"]))
                 contact["proj_points"] = np.vstack([contact["proj_points"], project_face_contact_points])
                 return
 
@@ -92,23 +122,24 @@ def compute_contacts_between_two_parts(partA: Trimesh,
         if contact["proj_points"].shape[0] >= 3:
             contact_points_2d = contact["proj_points"][:, :2]
             mpt = MultiPoint(contact_points_2d)
-            cvxhull_points_2d = from_shapely_to_numpy(mpt.convex_hull, simplify_tol = simplify_tol)
+            convexhull = shrink_or_swell_shapely_polygon(mpt.convex_hull, shrink_ratio)
+            cvxhull_points_2d = from_shapely_to_numpy(convexhull, simplify_tol=simplify_tol)
             if cvxhull_points_2d is not None:
                 contact_points = trimesh.transformations.transform_points(cvxhull_points_2d, contact["inv_proj"])
                 faces = []
                 for fid in range(0, len(contact_points) - 2):
                     faces.append([0, fid + 1, fid + 2])
                 cvxhull_contact_mesh = trimesh.Trimesh(vertices=contact_points, faces=faces)
-                #contact["proj_points"] = cvxhull_points_2d
-                #contact["points"] = contact_points
+
                 new_contact = {}
                 new_contact["mesh"] = cvxhull_contact_mesh
                 new_contact["plane"] = contact["inv_proj"]
                 new_contacts.append(new_contact)
     return new_contacts
 
+
 def fast_collision_check_using_convexhull(parts: list[Trimesh],
-                                        collision_scale:float = 1.1):
+                                          collision_scale: float = 1.1):
     collision_pairs = []
     n_part = len(parts)
     try:
@@ -130,28 +161,40 @@ def fast_collision_check_using_convexhull(parts: list[Trimesh],
                 collision_pairs.append([part_IDA, part_IDB])
     return collision_pairs
 
-def compute_assembly_contacts(parts: list[Trimesh],
-                              dist_tol=1E-3,
-                              nrm_tol=1E-3,
-                              area_tol=1E-5,
-                              simplify_tol=1E-4,
-                              collision_scale=1.1):
 
-    collision_pairs = fast_collision_check_using_convexhull(parts, collision_scale)
+def compute_assembly_contacts(parts: list[Trimesh],
+                              settings:dict = {}):
+    contact_settings = set_default(
+        settings,
+        "contact_settings",
+        {
+            "dist_tol": 1E-3,
+            "nrm_tol": 1E-3,
+            "area_tol": 1E-5,
+            "simplify_tol": 1E-4,
+            "collision_scale": 1.1,
+            "shrink_ratio": 0.0
+        }
+    )
+
+    n = SimpleNamespace(**contact_settings)
+    collision_pairs = fast_collision_check_using_convexhull(parts, n.collision_scale)
     contacts = []
     for [partIDA, partIDB] in collision_pairs:
         two_parts_contacts = compute_contacts_between_two_parts(parts[partIDA],
                                                                 parts[partIDB],
-                                                                dist_tol=dist_tol,
-                                                                nrm_tol=nrm_tol,
-                                                                area_tol=area_tol,
-                                                                simplify_tol=simplify_tol)
+                                                                dist_tol=n.dist_tol,
+                                                                nrm_tol=n.nrm_tol,
+                                                                area_tol=n.area_tol,
+                                                                simplify_tol=n.simplify_tol,
+                                                                shrink_ratio=n.shrink_ratio)
         for contact in two_parts_contacts:
             contact["iA"] = partIDA
             contact["iB"] = partIDB
         contacts.extend(two_parts_contacts)
 
     return contacts
+
 
 def load_assembly_from_files(obj_folder_path):
     '''
@@ -177,16 +220,28 @@ def load_assembly_from_files(obj_folder_path):
         parts.append(parts_dict[part_id])
     return parts
 
+
 if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR
     from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts
     import polyscope as ps
+
     init_polyscope()
+    settings = {
+        # "contact_settings": {
+        #     "dist_tol": 1E-3,
+        #     "nrm_tol": 1E-3,
+        #     "area_tol": 1E-5,
+        #     "simplify_tol": 1E-4,
+        #     "shrink_ratio": 0.1,
+        #     "collision_scale": 1.1
+        # }
+    }
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     part_states = np.ones(len(parts))
     part_states[0] = 2
     part_states[3] = 0
-    contacts = compute_assembly_contacts(parts)
+    contacts = compute_assembly_contacts(parts, settings)
     draw_contacts(contacts, part_states, enable=True)
     draw_assembly(parts, part_states)
     ps.show()

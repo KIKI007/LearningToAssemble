@@ -89,7 +89,9 @@ def test_compute_indices_mapping():
                             [1, 1],
                             [1, 2],
                             [2, 2]])
-    ps, cs = compute_indices_mapping(nf, nλn, contacts, part_states)
+    mapping = IndexMapping(nf, nλn, contacts)
+
+    ps, cs = mapping(part_states)
 
     np.linalg.norm(ps[6: 12, [0, 1, 2]]) < 1e-6
     np.linalg.norm(cs[6: 12, [0, 2]]) < 1e-6

@@ -4,6 +4,8 @@ from scipy.sparse import coo_matrix
 import math
 import torch
 import scipy
+from learn2assemble import set_default
+
 
 def num_vars(parts, contacts, nt=8):
     nf = len(parts) * 6
@@ -14,6 +16,7 @@ def num_vars(parts, contacts, nt=8):
         nλn += npt
         nλt += npt * nt
     return nf, nλn, nλt
+
 
 def compute_jacobian(parts, contacts, nt=8):
     nf, nλn, nλt = num_vars(parts, contacts)
@@ -63,6 +66,7 @@ def compute_jacobian(parts, contacts, nt=8):
     E = coo_matrix(E)
     E.eliminate_zeros()
     return Jn, Jt, E
+
 
 def compute_gravity(parts,
                     density: float = 1.0,
@@ -124,38 +128,6 @@ def compute_generalized_mass(parts,
     return M_sparse, invM_sparse, invML_sparse
 
 
-def compute_indices_mapping(nf,
-                            nλn,
-                            contacts: list[dict],
-                            batch_part_states: np.ndarray):
-    if batch_part_states.ndim == 1:
-        batch_part_states = batch_part_states.reshape(1, -1)
-
-    n_batch = batch_part_states.shape[0]
-    n_part = batch_part_states.shape[1]
-
-    p = np.zeros((nf, n_batch), dtype=np.float64)
-    for ib in range(n_batch):
-        part_states = batch_part_states[ib, :]
-        for part_id in range(n_part):
-            p[part_id * 6: part_id * 6 + 6, ib] = (part_states[part_id] == 1)
-
-    c = np.zeros((nλn, n_batch), dtype=np.float64)
-    for ib in range(n_batch):
-        part_states = batch_part_states[ib, :]
-        nf = 0
-        for contact in contacts:
-            iA = contact["iA"]
-            iB = contact["iB"]
-            for pt in contact["mesh"].vertices:
-                if part_states[iA] > 0 and part_states[iB] > 0 and (part_states[iA] < 2 or part_states[iB] < 2):
-                    c[nf, ib] = 1
-                else:
-                    c[nf, ib] = 0
-                nf = nf + 1
-    return p, c
-
-
 def Knt(Jn: scipy.sparse.coo_matrix,
         Jt: scipy.sparse.coo_matrix):
     Inf = scipy.sparse.eye_array(Jn.shape[1], dtype=np.float64)
@@ -211,24 +183,59 @@ def compute_rbe_dynamic_attribs(g: np.ndarray,
 
     return q, xl, xu, Al, Au
 
+class IndexMapping:
+
+    def __init__(self, nf, nλn, contacts):
+        self.nf = nf
+        self.nλn = nλn
+        self.contacts = contacts
+
+    def __call__(self, batch_part_states):
+
+        if batch_part_states.ndim == 1:
+            batch_part_states = batch_part_states.reshape(1, -1)
+
+        n_batch = batch_part_states.shape[0]
+        n_part = batch_part_states.shape[1]
+
+        p = np.zeros((self.nf, n_batch), dtype=np.float64)
+        for ib in range(n_batch):
+            part_states = batch_part_states[ib, :]
+            for part_id in range(n_part):
+                p[part_id * 6: part_id * 6 + 6, ib] = (part_states[part_id] == 1)
+
+        c = np.zeros((self.nλn, n_batch), dtype=np.float64)
+        for ib in range(n_batch):
+            part_states = batch_part_states[ib, :]
+            nf = 0
+            for contact in self.contacts:
+                iA = contact["iA"]
+                iB = contact["iB"]
+                for pt in contact["mesh"].vertices:
+                    if part_states[iA] > 0 and part_states[iB] > 0 and (part_states[iA] < 2 or part_states[iB] < 2):
+                        c[nf, ib] = 1
+                    else:
+                        c[nf, ib] = 0
+                    nf = nf + 1
+        return p, c
+
 def init_rbe(parts: list[Trimesh],
              contacts: list[dict],
              settings: dict):
 
-    default = {
-        "nt": 8,
-        "mu": 0.55,
-        "Ccp": 1E6,
-        "density": 1e4,
-        "boundary_part_ids": [],
-        "velocity_tol": 1e-3,
-        "verbose": False,
-    }
-
-    rbe = settings.get("rbe", {})
-    for name, value in default.items():
-        if name not in rbe:
-            rbe[name] = value
+    rbe = set_default(
+        settings,
+        "rbe",
+        {
+            "nt": 8,
+            "mu": 0.55,
+            "Ccp": 1E6,
+            "density": 1e4,
+            "boundary_part_ids": [],
+            "velocity_tol": 1e-3,
+            "verbose": False,
+        }
+    )
 
     nf, nλn, nλt = num_vars(parts, contacts, rbe["nt"])
     L, A, g, Jn, Jt, invM = compute_rbe_static_attribs(parts,
@@ -246,6 +253,5 @@ def init_rbe(parts: list[Trimesh],
     rbe["nλn"] = nλn
     rbe["nλt"] = nλt
     rbe["nf"] = nf
-    rbe["contacts"] = contacts
+    rbe["mapping"] = IndexMapping(nf, nλn, contacts)
     settings["rbe"] = rbe
-    return settings

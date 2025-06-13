@@ -9,17 +9,12 @@ dependencies = [
     "torch_geometric",
     "scipy==1.14.1",
     'shapely',
-    'cvxpy',
-    'Mosek',
     'gurobipy',
     'torch',
     "numpy == 1.26.4",
     "polyscope",
     "trimesh",
     "python-fcl",
-    "matplotlib",
-    "SciencePlots",
-    "pandas",
     "pytest"
 ]
 

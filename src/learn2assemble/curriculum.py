@@ -238,6 +238,7 @@ if __name__ == '__main__':
 
     contacts = compute_assembly_contacts(parts, settings)
     succeed, solution, curriculum = forward_curriculum(parts, contacts, settings)
+    print("succeed:\t", succeed)
 
     # import polyscope as ps
     # import polyscope.imgui as psim

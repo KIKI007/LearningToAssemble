@@ -5,7 +5,6 @@ import math
 import torch
 import scipy
 
-
 def num_vars(parts, contacts, nt=8):
     nf = len(parts) * 6
     nλn = 0
@@ -15,7 +14,6 @@ def num_vars(parts, contacts, nt=8):
         nλn += npt
         nλt += npt * nt
     return nf, nλn, nλt
-
 
 def compute_jacobian(parts, contacts, nt=8):
     nf, nλn, nλt = num_vars(parts, contacts)
@@ -65,7 +63,6 @@ def compute_jacobian(parts, contacts, nt=8):
     E = coo_matrix(E)
     E.eliminate_zeros()
     return Jn, Jt, E
-
 
 def compute_gravity(parts,
                     density: float = 1.0,
@@ -213,3 +210,42 @@ def compute_rbe_dynamic_attribs(g: np.ndarray,
                     Ccp * (1 - ps)])
 
     return q, xl, xu, Al, Au
+
+def init_rbe(parts: list[Trimesh],
+             contacts: list[dict],
+             settings: dict):
+
+    default = {
+        "nt": 8,
+        "mu": 0.55,
+        "Ccp": 1E6,
+        "density": 1e4,
+        "boundary_part_ids": [],
+        "velocity_tol": 1e-3,
+        "verbose": False,
+    }
+
+    rbe = settings.get("rbe", {})
+    for name, value in default.items():
+        if name not in rbe:
+            rbe[name] = value
+
+    nf, nλn, nλt = num_vars(parts, contacts, rbe["nt"])
+    L, A, g, Jn, Jt, invM = compute_rbe_static_attribs(parts,
+                                                       contacts,
+                                                       nt=rbe["nt"],
+                                                       mu=rbe["mu"],
+                                                       density=rbe["density"],
+                                                       boundary_part_ids=rbe["boundary_part_ids"])
+    rbe["A"] = A
+    rbe["L"] = L
+    rbe["g"] = g
+    rbe["Jn"] = Jn
+    rbe["Jt"] = Jt
+    rbe["invM"] = invM
+    rbe["nλn"] = nλn
+    rbe["nλt"] = nλt
+    rbe["nf"] = nf
+    rbe["contacts"] = contacts
+    settings["rbe"] = rbe
+    return settings

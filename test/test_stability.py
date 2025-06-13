@@ -1,11 +1,10 @@
 import numpy as np
 
-from learn2assemble.stability import *
+from learn2assemble.RBE import *
 from learn2assemble.assembly import *
 import os
 
 slope_test_folder = os.path.abspath(os.path.dirname(__file__) + "/data/slope")
-
 
 def test_num_vars():
     parts = load_assembly_from_files(slope_test_folder)
@@ -14,7 +13,6 @@ def test_num_vars():
     assert nf == len(parts) * 6
     assert nλn == 4
     assert nλt == 4 * 8
-
 
 def test_compute_jacobian():
     parts = load_assembly_from_files(slope_test_folder)

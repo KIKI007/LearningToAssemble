@@ -4,7 +4,6 @@ from scipy.cluster.vq import kmeans2
 from trimesh import Trimesh
 import learn2assemble.simulator
 
-
 def cluster(part_states: np.ndarray,
             prev_inds: np.ndarray,
             ncluster: int):

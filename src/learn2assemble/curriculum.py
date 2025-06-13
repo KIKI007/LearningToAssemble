@@ -227,11 +227,11 @@ if __name__ == '__main__':
         },
         "admm": {
             "evaluate_it": 200,
-            "max_iter": 4000,
+            "max_iter": 2000,
             "float_type": torch.float32,
         },
         "curriculum": {
-            "n_beam": 128,
+            "n_beam": 512,
             "n_robot": 2,
         }
     }

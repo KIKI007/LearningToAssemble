@@ -58,6 +58,21 @@ def init_admm(parts: list[Trimesh],
     settings["admm"] = admm
 
 
+@torch.compile
+def admm_step(xk, yk, zk, qk, zlk, zuk, Ah, AhT, inv_lhs, r, sigma, alpha, evaluate_iter):
+    with torch.no_grad():
+        for it in range(evaluate_iter):
+            rhs = sigma * xk - qk + torch.sparse.mm(AhT, r * zk - yk)
+            xh_k1 = (inv_lhs @ rhs)
+            x_k1 = (xh_k1 * alpha + xk * (1 - alpha))
+            zh_k1 = torch.sparse.mm(Ah, xh_k1)
+            z_alpha = alpha * zh_k1 + (1 - alpha) * zk
+            z_k1 = z_alpha + yk / r
+            z_k1 = torch.clip(z_k1, zlk, zuk)
+            y_k1 = yk + r * (z_alpha - z_k1)
+            xk, yk, zk = x_k1.clone(), y_k1.clone(), z_k1.clone()
+    return xk, yk, zk
+
 def simulate_admm(batch_part_states: list[dict],
                   settings: dict):
     n_batch = batch_part_states.shape[0]
@@ -99,19 +114,21 @@ def simulate_admm(batch_part_states: list[dict],
         qk, zlk, zuk = q[:, batch_inds].clone(), zl[:, batch_inds].clone(), zu[:, batch_inds].clone()
 
         # admm
-        with torch.no_grad():
-            for it in range(admm.evaluate_iter):
-                rhs = admm.sigma * xk - qk + torch.sparse.mm(admm.AhT, admm.r * zk - yk)
-                xh_k1 = (admm.inv_lhs @ rhs)
-                x_k1 = (xh_k1 * admm.alpha + xk * (1 - admm.alpha))
-                zh_k1 = torch.sparse.mm(admm.Ah, xh_k1)
-                z_alpha = admm.alpha * zh_k1 + (1 - admm.alpha) * zk
-                z_k1 = z_alpha + yk / admm.r
-                z_k1 = torch.clip(z_k1, zlk, zuk)
-                y_k1 = yk + admm.r * (z_alpha - z_k1)
-                xk, yk, zk = x_k1.clone(), y_k1.clone(), z_k1.clone()
+        x[:, batch_inds], y[:, batch_inds], z[:, batch_inds] = admm_step(xk, yk, zk, qk, zlk, zuk,
+                  admm.Ah, admm.AhT, admm.inv_lhs, admm.r, admm.sigma, admm.alpha, admm.evaluate_iter)
+        # with torch.no_grad():
+        #     for it in range(admm.evaluate_iter):
+        #         rhs = admm.sigma * xk - qk + torch.sparse.mm(admm.AhT, admm.r * zk - yk)
+        #         xh_k1 = (admm.inv_lhs @ rhs)
+        #         x_k1 = (xh_k1 * admm.alpha + xk * (1 - admm.alpha))
+        #         zh_k1 = torch.sparse.mm(admm.Ah, xh_k1)
+        #         z_alpha = admm.alpha * zh_k1 + (1 - admm.alpha) * zk
+        #         z_k1 = z_alpha + yk / admm.r
+        #         z_k1 = torch.clip(z_k1, zlk, zuk)
+        #         y_k1 = yk + admm.r * (z_alpha - z_k1)
+        #         xk, yk, zk = x_k1.clone(), y_k1.clone(), z_k1.clone()
 
-        x[:, batch_inds], y[:, batch_inds], z[:, batch_inds] = xk.clone(), yk.clone(), zk.clone()
+        #x[:, batch_inds], y[:, batch_inds], z[:, batch_inds] = xk.clone(), yk.clone(), zk.clone()
 
         # evualuation
         xclip = torch.clip(xk, zlk[admm.nA:, :], zuk[admm.nA:, :])
@@ -134,7 +151,7 @@ def simulate_admm(batch_part_states: list[dict],
 
 
 def init_gurobi(parts, contacts, settings: dict):
-    settings = init_rbe(parts, contacts, settings)
+    init_rbe(parts, contacts, settings)
     env = gp.Env()
     env.setParam('OptimalityTol', 1E-6)
     env.setParam('OutputFlag', settings["rbe"]["verbose"])

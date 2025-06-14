@@ -21,7 +21,6 @@ def from_scipy_to_torch_sparse(A: sp.sparse.coo_matrix,
 def init_admm(parts: list[Trimesh],
               contacts: list[dict],
               settings: dict):
-    init_rbe(parts, contacts, settings)
 
     admm = set_default(settings,
                        "admm",
@@ -55,6 +54,7 @@ def init_admm(parts: list[Trimesh],
     lhs = torch.tensor(lhs.todense(), dtype=torch.float64, device=device)
     cholesky_lhs = torch.linalg.cholesky(lhs)
     admm["inv_lhs"] = torch.cholesky_inverse(cholesky_lhs).type(float_type)
+    admm["pre-computed"] = True
     settings["admm"] = admm
 
 
@@ -72,6 +72,7 @@ def admm_step(xk, yk, zk, qk, zlk, zuk, Ah, AhT, inv_lhs, r, sigma, alpha, evalu
             y_k1 = yk + r * (z_alpha - z_k1)
             xk, yk, zk = x_k1.clone(), y_k1.clone(), z_k1.clone()
     return xk, yk, zk
+
 
 def simulate_admm(batch_part_states: list[dict],
                   settings: dict):
@@ -115,20 +116,8 @@ def simulate_admm(batch_part_states: list[dict],
 
         # admm
         x[:, batch_inds], y[:, batch_inds], z[:, batch_inds] = admm_step(xk, yk, zk, qk, zlk, zuk,
-                  admm.Ah, admm.AhT, admm.inv_lhs, admm.r, admm.sigma, admm.alpha, admm.evaluate_iter)
-        # with torch.no_grad():
-        #     for it in range(admm.evaluate_iter):
-        #         rhs = admm.sigma * xk - qk + torch.sparse.mm(admm.AhT, admm.r * zk - yk)
-        #         xh_k1 = (admm.inv_lhs @ rhs)
-        #         x_k1 = (xh_k1 * admm.alpha + xk * (1 - admm.alpha))
-        #         zh_k1 = torch.sparse.mm(admm.Ah, xh_k1)
-        #         z_alpha = admm.alpha * zh_k1 + (1 - admm.alpha) * zk
-        #         z_k1 = z_alpha + yk / admm.r
-        #         z_k1 = torch.clip(z_k1, zlk, zuk)
-        #         y_k1 = yk + admm.r * (z_alpha - z_k1)
-        #         xk, yk, zk = x_k1.clone(), y_k1.clone(), z_k1.clone()
-
-        #x[:, batch_inds], y[:, batch_inds], z[:, batch_inds] = xk.clone(), yk.clone(), zk.clone()
+                                                                         admm.Ah, admm.AhT, admm.inv_lhs, admm.r,
+                                                                         admm.sigma, admm.alpha, admm.evaluate_iter)
 
         # evualuation
         xclip = torch.clip(xk, zlk[admm.nA:, :], zuk[admm.nA:, :])
@@ -149,17 +138,15 @@ def simulate_admm(batch_part_states: list[dict],
 
     return v.cpu().numpy(), stable_flags.cpu().numpy()
 
-
 def init_gurobi(parts, contacts, settings: dict):
-    init_rbe(parts, contacts, settings)
     env = gp.Env()
     env.setParam('OptimalityTol', 1E-6)
     env.setParam('OutputFlag', settings["rbe"]["verbose"])
     env.setParam('Method', -1)
     settings["gurobi"] = {
-        "env": env
+        "env": env,
+        "pre-computed": True
     }
-
 
 def simulate_gurobi(batch_part_states: list[dict],
                     settings: dict):
@@ -205,19 +192,28 @@ def simulate_gurobi(batch_part_states: list[dict],
     return vs, np.array(flags)
 
 
-def init(parts: list[Trimesh], contacts: list[dict], settings: dict):
-    if "admm" in settings:
-        init_admm(parts, contacts, settings)
-    else:
-        init_gurobi(parts, contacts, settings)
 
-
-def simulate(batch_part_states: list[dict],
+def simulate(parts: list[Trimesh],
+             contacts: list[dict],
+             batch_part_states: list[dict],
              settings: dict):
-    if "admm" in settings:
-        return simulate_admm(batch_part_states, settings)
-    else:
+
+    rbe_pre_computed = settings.get("rbe", {"pre-computed": False}).get("pre-computed", False)
+    if not rbe_pre_computed:
+        init_rbe(parts, contacts, settings)
+
+    if "gurobi" in settings:
+        gurobi_pre_computed = settings["gurobi"].get("pre-computed", False)
+        if not gurobi_pre_computed:
+            init_gurobi(parts, contacts, settings)
         return simulate_gurobi(batch_part_states, settings)
+    else:
+        # by default running admm
+        admm_computed = settings.get("admm", {"pre-computed": False}).get("pre-computed", False)
+        if not admm_computed:
+            init_admm(parts, contacts, settings)
+        return simulate_admm(batch_part_states, settings)
+
 
 
 if __name__ == '__main__':
@@ -227,21 +223,27 @@ if __name__ == '__main__':
     import polyscope as ps
 
     init_polyscope()
+    # parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
+    # part_states = np.ones((1, len(parts)))
+    # b = len(parts) - 1
+    # part_states[0, b] = 2
+
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     part_states = np.zeros((1, len(parts)))
-    part_states[0, 0] = 2
     part_states[0, 3] = 1
     part_states[0, 5] = 1
+    b = 0
+    part_states[0, b] = 2
 
     settings = {
-        "contact_settings":{
+        "contact_settings": {
             "shrink_ratio": 0.1,
         },
         "rbe": {
             "density": 1E2,
             "mu": 0.55,
-            "velocity_tol": 1e-3,
-            "boundary_part_ids": [0],
+            "velocity_tol": 1e-2,
+            "boundary_part_ids": [b],
             "verbose": False,
         },
         "admm": {
@@ -253,10 +255,8 @@ if __name__ == '__main__':
     }
 
     contacts = compute_assembly_contacts(parts, settings)
-    init(parts, contacts, settings)
-    v_fp32, stable_fp32 = simulate(part_states, settings)
+    v_fp32, stable_fp32 = simulate(parts, contacts, part_states, settings)
     t = 0
-
     def callback():
         global t
         changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
@@ -264,6 +264,7 @@ if __name__ == '__main__':
             draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
 
 
+    draw_contacts(contacts, part_states[0])
     draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
     ps.set_user_callback(callback)
     ps.show()

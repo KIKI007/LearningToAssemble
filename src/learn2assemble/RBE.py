@@ -231,7 +231,7 @@ def init_rbe(parts: list[Trimesh],
             "mu": 0.55,
             "Ccp": 1E6,
             "density": 1e4,
-            "boundary_part_ids": [],
+            "boundary_part_ids": [len(parts) - 1],
             "velocity_tol": 1e-3,
             "verbose": False,
         }
@@ -254,4 +254,5 @@ def init_rbe(parts: list[Trimesh],
     rbe["nλt"] = nλt
     rbe["nf"] = nf
     rbe["mapping"] = IndexMapping(nf, nλn, contacts)
+    rbe["pre-computed"] = True
     settings["rbe"] = rbe

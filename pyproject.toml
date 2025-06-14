@@ -15,6 +15,7 @@ dependencies = [
     "polyscope",
     "trimesh",
     "python-fcl",
+    "matplotlib",
     "pytest"
 ]
 

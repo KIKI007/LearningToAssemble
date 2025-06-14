@@ -5,6 +5,7 @@ from trimesh import Trimesh
 import learn2assemble.simulator
 import time
 
+
 def cluster(part_states: np.ndarray,
             prev_inds: np.ndarray,
             ncluster: int):
@@ -102,7 +103,6 @@ def forward_release_actions(part_states: np.ndarray,
 def forward_actions(part_states: np.ndarray,
                     n_robot: int,
                     boundary_part_ids: list = []):
-
     install_states, install_prev_inds = forward_install_actions(part_states, n_robot, boundary_part_ids)
     release_states, release_prev_inds = forward_release_actions(part_states, boundary_part_ids)
 
@@ -118,8 +118,8 @@ def forward_actions(part_states: np.ndarray,
     return new_states, prev_inds, stability_verifying_flag
 
 
-def terminate(part_states: np.ndarray,
-              boundary_part_ids: list = []):
+def check_terminate(part_states: np.ndarray,
+                    boundary_part_ids: list = []):
     npart = part_states.shape[1]
     fixed_states = np.ones(npart)
     fixed_states[boundary_part_ids] = 2
@@ -140,21 +140,20 @@ def compute_solution(records):
 
 
 def forward_curriculum(parts: list[Trimesh],
-                   contacts: list[dict],
-                   settings: dict = {}):
+                       contacts: list[dict],
+                       n_robot: int,
+                       settings: dict = {}):
     # create simulator
     learn2assemble.simulator.init(parts, contacts, settings)
 
     # parameters
     boundary_part_ids = settings["rbe"]["boundary_part_ids"]
     search = set_default(settings,
-                         "curriculum",
+                         "search",
                          {
-                             "n_robot": 2,
                              "n_beam": 64
                          })
 
-    n_robot = search["n_robot"]
     n_beam = search["n_beam"]
 
     # init states
@@ -169,7 +168,7 @@ def forward_curriculum(parts: list[Trimesh],
         "prev_inds": [],
     }
 
-    while (part_states.shape[0] > 0 and not terminate(part_states, boundary_part_ids).any()):
+    while (part_states.shape[0] > 0 and not check_terminate(part_states, boundary_part_ids).any()):
         iter += 1
 
         part_states, prev_inds, verifying_flag = forward_actions(part_states, n_robot, boundary_part_ids)
@@ -201,58 +200,60 @@ def forward_curriculum(parts: list[Trimesh],
         else:
             return False, compute_solution(records), np.vstack(curriculum)
 
-    flag = terminate(part_states, boundary_part_ids)
+    flag = check_terminate(part_states, boundary_part_ids)
     records["part_states"][-1] = records["part_states"][-1][flag, :]
     records["prev_inds"][-1] = records["prev_inds"][-1][flag]
     return True, compute_solution(records), np.vstack(curriculum)
+
 
 if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import torch
-    from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
 
     settings = {
         "contact_settings": {
-            "shrink_ratio": 0.0,
+            "shrink_ratio": 0.1,
         },
         "rbe": {
-            "density": 1E3,
+            "density": 1E2,
             "mu": 0.55,
             "velocity_tol": 1e-2,
-            "boundary_part_ids": [len(parts) - 1],
+            "boundary_part_ids": [0],
             "verbose": False,
         },
         "admm": {
-            "evaluate_it": 200,
-            "max_iter": 2000,
+            "evaluate_it": 100,
+            "max_iter": 1000,
             "float_type": torch.float32,
         },
-        "curriculum": {
-            "n_beam": 512,
-            "n_robot": 2,
+        "search": {
+            "n_beam": 64,
         }
     }
 
     contacts = compute_assembly_contacts(parts, settings)
-    succeed, solution, curriculum = forward_curriculum(parts, contacts, settings)
+    succeed, solution, curriculum = forward_curriculum(parts, contacts, 2, settings)
     print("succeed:\t", succeed)
 
-    # import polyscope as ps
-    # import polyscope.imgui as psim
-    # step_id = 0
-    # init_polyscope()
-    # draw_assembly(parts, solution[-1, :])
-    #
-    # def interact():
-    #     global step_id
-    #     changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=solution.shape[0] - 1)
-    #     if changed:
-    #         ps.remove_all_structures()
-    #         ps.remove_all_groups()
-    #         draw_assembly(parts, solution[step_id, :])
-    #
-    # ps.set_user_callback(interact)
-    # ps.show()
+    from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts
+    import polyscope as ps
+    import polyscope.imgui as psim
+
+    step_id = 0
+    init_polyscope()
+    draw_assembly(parts, solution[-1, :])
+
+    def interact():
+        global step_id
+        changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=solution.shape[0] - 1)
+        if changed:
+            ps.remove_all_structures()
+            ps.remove_all_groups()
+            draw_assembly(parts, solution[step_id, :])
+
+
+    ps.set_user_callback(interact)
+    ps.show()

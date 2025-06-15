@@ -190,8 +190,6 @@ def simulate_gurobi(batch_part_states: list[dict],
     vs = vs.T
     return vs, np.array(flags)
 
-
-
 def simulate(parts: list[Trimesh],
              contacts: list[dict],
              batch_part_states: list[dict],

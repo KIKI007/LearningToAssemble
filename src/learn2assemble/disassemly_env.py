@@ -4,6 +4,8 @@ import numpy as np
 import learn2assemble.simulator
 from time import perf_counter
 from trimesh import Trimesh
+from learn2assemble import set_default
+from learn2assemble.buffer import RolloutBufferGNN
 
 
 class Timer:
@@ -24,6 +26,7 @@ class Timer:
             self.accumulator[name] = elapse
         return elapse, self.accumulator[name]
 
+
 class DisassemblyEnv:
     def __init__(self,
                  parts: list[Trimesh],
@@ -37,7 +40,9 @@ class DisassemblyEnv:
                                        "boundary_part_ids": [0],
                                        "sim_buffer_size": 64,
                                        "num_rollouts": 64,
+                                       "seed": 0,
                                    })
+
         env_settings = SimpleNamespace(**env_settings)
         self.settings = settings
 
@@ -47,7 +52,7 @@ class DisassemblyEnv:
         self.n_robot = env_settings.n_robot
         self.n_part = len(parts)
         self.num_rollouts = env_settings.num_rollouts
-        self.boundary_part_ids =  env_settings.boundary_part_ids
+        self.boundary_part_ids = env_settings.boundary_part_ids
         self.n_max_held_part = self.n_robot + len(self.boundary_part_ids)
         self.sim_buffer_size = env_settings.sim_buffer_size
 
@@ -86,13 +91,12 @@ class DisassemblyEnv:
             weights = np.ones(nc) / nc
         inds = np.random.choice(a=nc, size=self.num_rollouts, replace=replacement, p=weights)
         part_states = self.curriculum[inds, :]
-        self.trajectories = [[{"state": part_state.copy(), "reward": 0, "stability": 1,}] for part_state in part_states]
-        self.update_buffer = False
+        self.updated_simulation = False
         return part_states, np.arange(self.num_rollouts)
 
     def simulate_buffer(self, simulate_remain=False):
-        while len(self.sim_buffer):
 
+        while len(self.sim_buffer):
             num_to_sim = min(self.sim_buffer_size, len(self.sim_buffer))
             if num_to_sim < self.sim_buffer_size and not simulate_remain:
                 break
@@ -106,7 +110,7 @@ class DisassemblyEnv:
             stable_flag = stable_flag.astype(np.int32) * 2 - 1
             self.add_stability_history(part_states, stable_flag)
             self.sim_buffer = self.sim_buffer[num_to_sim:]
-            self.update_buffer = True
+            self.updated_simulation = True
 
     def sample_actions(self, part_states: np.ndarray):
         masks = self.action_masks(part_states)
@@ -214,28 +218,6 @@ class DisassemblyEnv:
 
         return new_part_states, rewards, stability
 
-    def update_trajectories(self):
-        self.timer.start("history")
-        # update buffer
-        if self.update_buffer:
-            for env_id in range(len(self.trajectories)):
-                for jd, step in enumerate(self.trajectories[env_id]):
-                    if step["stability"] == 0:
-                        state_encode = tuple(step["state"].tolist())
-                        step["stability"] = self.stability_history[state_encode]
-                    if step["stability"] == -1:
-                        step["reward"] = -1
-                        self.trajectories[env_id] = self.trajectories[env_id][: jd + 1]
-                        break
-            self.update_buffer = False
-
-        # update enviroment inds
-        env_inds = []
-        for env_id in range(len(self.trajectories)):
-            if self.trajectories[env_id][-1]["reward"] == 0:
-                env_inds.append(env_id)
-        self.timer.stop("history", True)
-        return  np.array(env_inds)
 
 if __name__ == "__main__":
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
@@ -243,51 +225,80 @@ if __name__ == "__main__":
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import torch
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     settings = {
         "contact_settings": {
             "shrink_ratio": 0.0,
         },
+        "env": {
+            "n_robot": 2,
+            "boundary_part_ids": [0],
+            "sim_buffer_size": 64,
+            "num_rollouts": 1,
+        },
         "rbe": {
-            "density": 1E4,
+            "density": 1E2,
             "mu": 0.55,
             "velocity_tol": 1e-2,
             "verbose": False,
         },
-        # "gurobi": {
-        #
-        # },
         "admm": {
             "Ccp": 1E6,
             "evaluate_it": 100,
             "max_iter": 1000,
             "float_type": torch.float32,
         },
-        "env":{
-            "n_robot": 2,
-            "boundary_part_ids": [0],
-            "sim_buffer_size": 2048*2,
-            "num_rollouts": 10000,
+        "search": {
+            "n_beam": 64,
+        },
+        "policy": {
+            "gat_layers": 8,
+            "gat_heads": 1,
+            "gat_hidden_dims": 16,
+            "gat_dropout": 0.0,
+            "centroids": False
+        },
+        "ppo": {
+            "gamma": 0.95,
+            "eps_clip": 0.2,
+
+            "base_entropy_weight": 0.005,
+            "entropy_weight_increase": 0.001,
+            "max_entropy_weight": 0.01,
+
+            "lr_milestones": [100, 300],
+            "num_step_anneal": 500,
+            "lr_actor": 2e-3,
+            "betas_actor": [0.95, 0.999],
         }
     }
 
     contacts = compute_assembly_contacts(parts, settings)
     env = DisassemblyEnv(parts, contacts, settings=settings)
+    ppo_config = SimpleNamespace(**settings["ppo"])
 
     part_states, env_inds = env.reset()
+    buffer = RolloutBufferGNN(n_robot=env.n_robot,
+                              num_curriculums=1,
+                              gamma=ppo_config.gamma,
+                              base_entropy_weight=ppo_config.base_entropy_weight,
+                              entropy_weight_increase=ppo_config.entropy_weight_increase,
+                              max_entropy_weight=ppo_config.max_entropy_weight,
+                              num_step_anneal=ppo_config.num_step_anneal)
+    buffer.clear(env.num_rollouts)
     n_step = 0
     while True:
         current_part_states = part_states[env_inds, :]
         current_actions = env.sample_actions(current_part_states)
-        new_states, rewards, stability = env.step(current_part_states, current_actions)
-        part_states[env_inds, :] = new_states
+        next_states, rewards, next_stability = env.step(current_part_states, current_actions)
+        part_states[env_inds, :] = next_states
 
-        for id, env_id in enumerate(env_inds):
-            env.trajectories[env_id].append({"state": new_states[id].copy(),
-                                              "reward": rewards[id],
-                                              "stability": stability[id]
-                                              })
-        env_inds = env.update_trajectories()
+        buffer.add("part_states", current_part_states, env_inds)
+        buffer.add("next_states", next_states, env_inds)
+        buffer.add("rewards_per_step", rewards, env_inds)
+        buffer.add("next_stability", next_stability, env_inds)
+
+        env_inds = buffer.get_valid_env_inds(env)
 
         print(f"n_step {n_step},\t rollout {len(env_inds)}")
         # print(f"sim {env.timer.accumulator['simulation']: .2f},\t history {env.timer.accumulator['history']: .2f}")
@@ -296,36 +307,37 @@ if __name__ == "__main__":
         if env_inds.shape[0] == 0:
             break
 
-    env.simulate_buffer(simulate_remain=True)
-    env.update_trajectories()
+    env.simulate_buffer(True)
+    buffer.get_valid_env_inds(env)
 
-    # import polyscope as ps
-    # env_id = 0
-    # step_id = 0
-    # init_polyscope()
-    #
-    # solutions = []
-    # max_length = 0
-    # for traj in env.trajectories:
-    #     max_length = max(max_length, len(traj))
-    # for traj in env.trajectories:
-    #     if len(traj) == max_length:
-    #         solutions.append(traj)
-    #
-    # def interact():
-    #     global step_id, env_id
-    #     render = False
-    #     changed, env_id = psim.SliderInt("env", v=env_id, v_min=0, v_max=len(solutions) - 1)
-    #     if changed:
-    #         step_id = 0
-    #     render = render or changed
-    #     changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=len(solutions[env_id]) - 1)
-    #     render = render or changed
-    #     if render:
-    #         ps.remove_all_structures()
-    #         ps.remove_all_groups()
-    #         draw_assembly(parts, solutions[env_id][step_id]["state"])
-    #
-    # draw_assembly(parts, env.curriculum[0])
-    # ps.set_user_callback(interact)
-    # ps.show()
+    import polyscope as ps
+    env_id = 0
+    step_id = 0
+    init_polyscope()
+
+    solutions = []
+    max_steps = 0
+    for env_ind in range(env.num_rollouts):
+        max_steps = max(max_steps, len(buffer.part_states[env_ind]))
+
+    for env_ind in range(env.num_rollouts):
+        if len(buffer.part_states[env_ind]) == max_steps:
+            solutions.append(buffer.next_states[env_ind])
+
+    def interact():
+        global step_id, env_id
+        render = False
+        changed, env_id = psim.SliderInt("env", v=env_id, v_min=0, v_max=len(solutions) - 1)
+        if changed:
+            step_id = 0
+        render = render or changed
+        changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=len(solutions[env_id]) - 1)
+        render = render or changed
+        if render:
+            ps.remove_all_structures()
+            ps.remove_all_groups()
+            draw_assembly(parts, solutions[env_id][step_id])
+
+    draw_assembly(parts, env.curriculum[0])
+    ps.set_user_callback(interact)
+    ps.show()

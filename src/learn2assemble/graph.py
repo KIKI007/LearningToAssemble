@@ -89,12 +89,11 @@ class GFTFGraphConstructor:
         self.torque_force_ids = self._int(self.torque_force_ids)
 
 
-    def graphs(self, part_states: np.ndarray):
+    def graphs(self, part_states: torch.tensor):
         datalist = []
         for id in range(part_states.shape[0]):
             data = HeteroData()
-
-            part_state = torch.tensor(part_states[id, :], device=device, dtype=torch.int32)
+            part_state = part_states[id, :]
             install_state = (part_state >= 1).type(torch.bool)
             held_state = (part_state == 2).type(torch.bool)
             nonremove_state = torch.zeros(part_state.shape[0], device=device, dtype=torch.bool)
@@ -256,10 +255,9 @@ if __name__ == "__main__":
 
     graph_constructor = GFTFGraphConstructor(parts, contacts)
 
-    bin_states = torch.zeros((1, len(parts), 3), device=device, dtype=intType)
-    bin_states[0, 0, 0] = 1
-    bin_states[0, 1, 0] = 1
-    bin_states[0, 1, 1] = 1
-    bin_states[0, 1, 2] = 2
-    graphs = graph_constructor.graphs(bin_states)
+    part_states = np.zeros(shape = (1, len(parts)), dtype=np.int32)
+    part_states[0, 0] = 1
+    part_states[0, 1] = 2
+    part_states = torch.tensor(part_states, dtype=torch.int32, device=device)
+    graphs = graph_constructor.graphs(part_states)
     draw_pygdata(graphs[0], iter = 500)

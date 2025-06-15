@@ -47,6 +47,9 @@ class PPO:
 
         n_curriculums = env.curriculum.shape[0]
         self.saved_accuracy = 0
+        self.episode = 0
+        self.eps_clip = ppo_config.eps_clip
+
         self.num_failed = torch.zeros(n_curriculums, dtype=intType, device=device)
         self.num_success = torch.zeros(n_curriculums, dtype=intType, device=device)
         self.buffer = RolloutBufferGNN(n_robot=env.n_robot,
@@ -91,7 +94,8 @@ class PPO:
         variables = [graphs, action, action_logprob, state_val, masks]
         for id, name in enumerate(namelist):
             self.buffer.add(name, variables[id], env_inds)
-        return action
+
+        return action.cpu().numpy()
 
     def compute_policy(self,
                        part_states: np.ndarray,
@@ -130,10 +134,9 @@ class PPO:
 
         # dl = torch_geometric.utils.data.DataLoader(dataset,pin_memory=True)
         self.policy.train(True)
-        if self.scheduler is not None:
-            self.scheduler.step()
 
         # reset optimizer
+        self.scheduler.step()
         self.optimizer_params['lr'], *_ = self.scheduler.get_last_lr()
         self.optimizer = torch.optim.Adam([self.optimizer_params])
 
@@ -159,14 +162,13 @@ class PPO:
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         # clear buffer
-        num_training_data = self.buffer.num_training_data
         self.buffer.clear()
 
         # avoid empty list
         if len(entropy) == 0:
             entropy = [0]
             loss = [0]
-        return np.sum(loss), np.mean(entropy), num_training_data
+        return np.sum(loss), np.mean(entropy)
 
     def train_one_epoch(self,
                         old_states,
@@ -224,7 +226,7 @@ class PPO:
     def save(self, checkpoint_path, print_info=None):
         if print_info is None:
             print_info = f"Untested policy; Accuracy on the prioritized replay buffer: {self.saved_accuracy}"
-        d = {'config': wandb.config.as_dict(),
+        d = {#'config': wandb.config.as_dict(),
              'state_dict': self.policy_old.state_dict(),
              'print_info': print_info}
         with open(checkpoint_path, 'wb') as handle:
@@ -237,75 +239,3 @@ class PPO:
             torch.load(checkpoint_path, map_location=lambda storage, loc: storage, weights_only=False))
         self.policy.load_state_dict(
             torch.load(checkpoint_path, map_location=lambda storage, loc: storage, weights_only=False))
-
-
-def init_ppo_agent(parts: list[Trimesh],
-                   contacts: dict,
-                   settings: dict):
-
-    env = DisassemblyEnv(parts, contacts, settings=settings)
-    torch_geometric.seed.seed_everything(settings["env"]["seed"])
-
-    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
-    env.set_curriculum(curriculum)
-
-    ppo_agent = PPO(env, settings)
-    return ppo_agent
-
-
-if __name__ == '__main__':
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
-    from learn2assemble.render import *
-    from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    import torch
-
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
-    settings = {
-        "contact_settings": {
-            "shrink_ratio": 0.0,
-        },
-        "env": {
-            "n_robot": 2,
-            "boundary_part_ids": [0],
-            "sim_buffer_size": 1024,
-            "num_rollouts": 512,
-        },
-        "rbe": {
-            "density": 1E2,
-            "mu": 0.55,
-            "velocity_tol": 1e-2,
-            "verbose": False,
-        },
-        "admm": {
-            "Ccp": 1E6,
-            "evaluate_it": 100,
-            "max_iter": 1000,
-            "float_type": torch.float32,
-        },
-        "search": {
-            "n_beam": 64,
-        },
-        "policy": {
-            "gat_layers": 8,
-            "gat_heads": 1,
-            "gat_hidden_dims": 16,
-            "gat_dropout": 0.0,
-            "centroids": False
-        },
-        "ppo": {
-            "gamma": 0.95,
-            "eps_clip": 0.2,
-
-            "base_entropy_weight": 0.005,
-            "entropy_weight_increase": 0.001,
-            "max_entropy_weight": 0.01,
-
-            "lr_milestones": [100, 300],
-            "num_step_anneal": 500,
-            "lr_actor": 2e-3,
-            "betas_actor": [0.95, 0.999],
-        }
-    }
-
-    contacts = compute_assembly_contacts(parts)
-    ppo_agent = init_ppo_agent(parts, contacts, settings)

@@ -41,6 +41,7 @@ class DisassemblyEnv:
                                        "sim_buffer_size": 64,
                                        "num_rollouts": 64,
                                        "seed": 0,
+                                       "verbose": False,
                                    })
 
         env_settings = SimpleNamespace(**env_settings)
@@ -48,6 +49,7 @@ class DisassemblyEnv:
 
         self.parts = parts
         self.contacts = contacts
+        self.verbose = env_settings.verbose
 
         self.n_robot = env_settings.n_robot
         self.n_part = len(parts)
@@ -59,6 +61,7 @@ class DisassemblyEnv:
         self.timer = Timer()
         self.sim_buffer = []
         self.stability_history = {}
+        self.updated_simulation = False
 
         # set the complete assembly state as curriculum
         curriculum = np.ones((1, len(parts)), dtype=np.int32)
@@ -91,7 +94,6 @@ class DisassemblyEnv:
             weights = np.ones(nc) / nc
         inds = np.random.choice(a=nc, size=self.num_rollouts, replace=replacement, p=weights)
         part_states = self.curriculum[inds, :]
-        self.updated_simulation = False
         return part_states, np.arange(self.num_rollouts)
 
     def simulate_buffer(self, simulate_remain=False):
@@ -105,7 +107,8 @@ class DisassemblyEnv:
             self.timer.start("simulation")
             _, stable_flag = learn2assemble.simulator.simulate(self.parts, self.contacts, part_states, self.settings)
             elapse, _ = self.timer.stop("simulation", True)
-            print(f"num_sim {part_states.shape[0]}, \t avg_sim {round(elapse / part_states.shape[0], 4)}")
+            if self.verbose:
+                print(f"num_sim {part_states.shape[0]}, \t avg_sim {round(elapse / part_states.shape[0], 4)}")
 
             stable_flag = stable_flag.astype(np.int32) * 2 - 1
             self.add_stability_history(part_states, stable_flag)
@@ -233,8 +236,8 @@ if __name__ == "__main__":
         "env": {
             "n_robot": 2,
             "boundary_part_ids": [0],
-            "sim_buffer_size": 64,
-            "num_rollouts": 1,
+            "sim_buffer_size": 1024,
+            "num_rollouts": 10240,
         },
         "rbe": {
             "density": 1E2,
@@ -298,17 +301,16 @@ if __name__ == "__main__":
         buffer.add("rewards_per_step", rewards, env_inds)
         buffer.add("next_stability", next_stability, env_inds)
 
-        env_inds = buffer.get_valid_env_inds(env)
+        env_inds, _ = buffer.get_valid_env_inds(env)
 
         print(f"n_step {n_step},\t rollout {len(env_inds)}")
-        # print(f"sim {env.timer.accumulator['simulation']: .2f},\t history {env.timer.accumulator['history']: .2f}")
 
         n_step += 1
         if env_inds.shape[0] == 0:
             break
 
     env.simulate_buffer(True)
-    buffer.get_valid_env_inds(env)
+    _, rewards = buffer.get_valid_env_inds(env)
 
     import polyscope as ps
     env_id = 0
@@ -317,12 +319,12 @@ if __name__ == "__main__":
 
     solutions = []
     max_steps = 0
-    for env_ind in range(env.num_rollouts):
-        max_steps = max(max_steps, len(buffer.part_states[env_ind]))
 
     for env_ind in range(env.num_rollouts):
-        if len(buffer.part_states[env_ind]) == max_steps:
-            solutions.append(buffer.next_states[env_ind])
+        if rewards[env_ind] > 0:
+            list = buffer.next_states[env_ind].copy()
+            list.reverse()
+            solutions.append(list)
 
     def interact():
         global step_id, env_id

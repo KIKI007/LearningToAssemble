@@ -124,10 +124,13 @@ class RolloutBufferGNN:
 
         # update enviroment inds
         env_inds = []
+        rewards = []
         for env_id in range(self.num_envs):
-            if self.rewards_per_step[env_id][-1] == 0:
+            reward = self.rewards_per_step[env_id][-1]
+            if reward == 0:
                 env_inds.append(env_id)
-        return np.array(env_inds)
+            rewards.append(reward)
+        return np.array(env_inds), np.array(rewards)
 
     def add(self, name, vals, env_inds):
         for ival, ienv in enumerate(env_inds):
@@ -152,7 +155,7 @@ class RolloutBufferGNN:
             for istep in torch.arange(len(self.actions[ienv]) - 1, -1, -1):
                 # collect dataset
                 rewards.append(discounted_reward.pin_memory())
-                states.append(self.states[ienv][istep].pin_memory())
+                states.append(self.states[ienv][istep])
                 actions.append(self.actions[ienv][istep].pin_memory())
                 logprobs.append(self.logprobs[ienv][istep].pin_memory())
                 state_values.append(self.state_values[ienv][istep].pin_memory())
@@ -177,7 +180,7 @@ class RolloutBufferGNN:
             dataset.add_states(states)
             dataset.curriculum_id = torch.hstack(curriculum_id)
 
-            dataset.weights = torch.pow(1+self.curriculum_rank[curriculum_id],self.alpha - self.beta).cpu().pin_memory()
+            dataset.weights = torch.pow(1 + self.curriculum_rank[dataset.curriculum_id], self.alpha - self.beta).cpu().pin_memory()
             dataset.weights /= dataset.weights.max()
-            dataset.entropy_weights = self.entropy_weights[curriculum_id].cpu().pin_memory()
+            dataset.entropy_weights = self.entropy_weights[dataset.curriculum_id].cpu().pin_memory()
         return dataset

@@ -36,7 +36,7 @@ class DisassemblyEnv:
                                        "n_robot": 2,
                                        "boundary_part_ids": [0],
                                        "sim_buffer_size": 64,
-                                       "num_envs": 64,
+                                       "num_rollouts": 64,
                                    })
         env_settings = SimpleNamespace(**env_settings)
         self.settings = settings
@@ -46,7 +46,7 @@ class DisassemblyEnv:
 
         self.n_robot = env_settings.n_robot
         self.n_part = len(parts)
-        self.num_envs = env_settings.num_envs
+        self.num_rollouts = env_settings.num_rollouts
         self.boundary_part_ids =  env_settings.boundary_part_ids
         self.n_max_held_part = self.n_robot + len(self.boundary_part_ids)
         self.sim_buffer_size = env_settings.sim_buffer_size
@@ -84,11 +84,11 @@ class DisassemblyEnv:
         nc = len(self.curriculum)
         if weights is None:
             weights = np.ones(nc) / nc
-        inds = np.random.choice(a=nc, size=self.num_envs, replace=replacement, p=weights)
+        inds = np.random.choice(a=nc, size=self.num_rollouts, replace=replacement, p=weights)
         part_states = self.curriculum[inds, :]
         self.trajectories = [[{"state": part_state.copy(), "reward": 0, "stability": 1,}] for part_state in part_states]
         self.update_buffer = False
-        return part_states, np.arange(env.num_envs)
+        return part_states, np.arange(self.num_rollouts)
 
     def simulate_buffer(self, simulate_remain=False):
         while len(self.sim_buffer):
@@ -254,20 +254,20 @@ if __name__ == "__main__":
             "velocity_tol": 1e-2,
             "verbose": False,
         },
-        "gurobi": {
-
-        },
-        # "admm": {
-        #     "Ccp": 1E6,
-        #     "evaluate_it": 100,
-        #     "max_iter": 1000,
-        #     "float_type": torch.float32,
+        # "gurobi": {
+        #
         # },
+        "admm": {
+            "Ccp": 1E6,
+            "evaluate_it": 100,
+            "max_iter": 1000,
+            "float_type": torch.float32,
+        },
         "env":{
             "n_robot": 2,
             "boundary_part_ids": [0],
-            "sim_buffer_size": 512,
-            "num_rollouts": 512,
+            "sim_buffer_size": 2048*2,
+            "num_rollouts": 10000,
         }
     }
 
@@ -299,33 +299,33 @@ if __name__ == "__main__":
     env.simulate_buffer(simulate_remain=True)
     env.update_trajectories()
 
-    import polyscope as ps
-    env_id = 0
-    step_id = 0
-    init_polyscope()
-
-    solutions = []
-    max_length = 0
-    for traj in env.trajectories:
-        max_length = max(max_length, len(traj))
-    for traj in env.trajectories:
-        if len(traj) == max_length:
-            solutions.append(traj)
-
-    def interact():
-        global step_id, env_id
-        render = False
-        changed, env_id = psim.SliderInt("env", v=env_id, v_min=0, v_max=len(solutions) - 1)
-        if changed:
-            step_id = 0
-        render = render or changed
-        changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=len(solutions[env_id]) - 1)
-        render = render or changed
-        if render:
-            ps.remove_all_structures()
-            ps.remove_all_groups()
-            draw_assembly(parts, solutions[env_id][step_id]["state"])
-
-    draw_assembly(parts, env.curriculum[0])
-    ps.set_user_callback(interact)
-    ps.show()
+    # import polyscope as ps
+    # env_id = 0
+    # step_id = 0
+    # init_polyscope()
+    #
+    # solutions = []
+    # max_length = 0
+    # for traj in env.trajectories:
+    #     max_length = max(max_length, len(traj))
+    # for traj in env.trajectories:
+    #     if len(traj) == max_length:
+    #         solutions.append(traj)
+    #
+    # def interact():
+    #     global step_id, env_id
+    #     render = False
+    #     changed, env_id = psim.SliderInt("env", v=env_id, v_min=0, v_max=len(solutions) - 1)
+    #     if changed:
+    #         step_id = 0
+    #     render = render or changed
+    #     changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=len(solutions[env_id]) - 1)
+    #     render = render or changed
+    #     if render:
+    #         ps.remove_all_structures()
+    #         ps.remove_all_groups()
+    #         draw_assembly(parts, solutions[env_id][step_id]["state"])
+    #
+    # draw_assembly(parts, env.curriculum[0])
+    # ps.set_user_callback(interact)
+    # ps.show()

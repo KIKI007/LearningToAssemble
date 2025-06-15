@@ -238,12 +238,13 @@ if __name__ == "__main__":
             "boundary_part_ids": [0],
             "sim_buffer_size": 1024*16,
             "num_rollouts": 100000,
+            "verbose": True,
         },
         "rbe": {
             "density": 1E4,
             "mu": 0.55,
             "velocity_tol": 1e-2,
-            "verbose": True,
+            "verbose": False,
         },
         "admm": {
             "Ccp": 1E6,

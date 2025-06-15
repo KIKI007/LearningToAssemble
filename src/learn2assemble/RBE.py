@@ -231,19 +231,18 @@ def init_rbe(parts: list[Trimesh],
             "mu": 0.55,
             "Ccp": 1E6,
             "density": 1e4,
-            "boundary_part_ids": [len(parts) - 1],
             "velocity_tol": 1e-3,
             "verbose": False,
         }
     )
-
+    boundary_part_ids = settings.get("env", {}).get("boundary_part_ids", [])
     nf, nλn, nλt = num_vars(parts, contacts, rbe["nt"])
     L, A, g, Jn, Jt, invM = compute_rbe_static_attribs(parts,
                                                        contacts,
                                                        nt=rbe["nt"],
                                                        mu=rbe["mu"],
                                                        density=rbe["density"],
-                                                       boundary_part_ids=rbe["boundary_part_ids"])
+                                                       boundary_part_ids=boundary_part_ids)
     rbe["A"] = A
     rbe["L"] = L
     rbe["g"] = g

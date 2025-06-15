@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import learn2assemble.simulator
 from time import perf_counter
@@ -26,28 +28,37 @@ class DisassemblyEnv:
     def __init__(self,
                  parts: list[Trimesh],
                  contacts: dict,
-                 n_robot: int,
-                 sim_buffer_size: int,
-                 settings: dict):
+                 settings: dict = {}):
+
+        env_settings = set_default(settings,
+                                   "env",
+                                   {
+                                       "n_robot": 2,
+                                       "boundary_part_ids": [0],
+                                       "sim_buffer_size": 64,
+                                       "num_envs": 64,
+                                   })
+        env_settings = SimpleNamespace(**env_settings)
+        self.settings = settings
 
         self.parts = parts
         self.contacts = contacts
-        self.settings = settings
-        self.n_robot = n_robot
+
+        self.n_robot = env_settings.n_robot
         self.n_part = len(parts)
+        self.num_envs = env_settings.num_envs
+        self.boundary_part_ids =  env_settings.boundary_part_ids
+        self.n_max_held_part = self.n_robot + len(self.boundary_part_ids)
+        self.sim_buffer_size = env_settings.sim_buffer_size
 
-        self.stability_history = {}
         self.timer = Timer()
-
-        self.boundary_part_ids = settings["rbe"]["boundary_part_ids"]
-        self.n_max_held_part = n_robot + len(self.boundary_part_ids)
-        self.curriculum = np.ones((1, len(parts)), dtype=np.int32)
-        self.curriculum[0, self.boundary_part_ids] = 2
-
-        self.add_stability_history(self.curriculum, np.ones(len(self.curriculum), dtype=np.bool_))
-
         self.sim_buffer = []
-        self.buffer_size = sim_buffer_size
+        self.stability_history = {}
+
+        # set the complete assembly state as curriculum
+        curriculum = np.ones((1, len(parts)), dtype=np.int32)
+        curriculum[0, self.boundary_part_ids] = 2
+        self.set_curriculum(curriculum)
 
     @property
     def action_dim(self):
@@ -57,6 +68,11 @@ class DisassemblyEnv:
     def state_dim(self):
         return self.n_part
 
+    def set_curriculum(self, curriculum: np.ndarray):
+        self.curriculum = curriculum.copy()
+        stable_flag = np.ones(len(self.curriculum), dtype=np.int32)
+        self.add_stability_history(self.curriculum, stable_flag)
+
     def check_terminate(self,
                         part_states: np.ndarray):
         fixed_states = np.zeros(self.n_part)
@@ -64,35 +80,33 @@ class DisassemblyEnv:
         dist = np.sum(np.abs(part_states - fixed_states[None, :]), axis=1)
         return dist == 0
 
-    def reset(self, num_envs: int, weights=None, replacement=True):
+    def reset(self, weights=None, replacement=True):
         nc = len(self.curriculum)
         if weights is None:
             weights = np.ones(nc) / nc
-        inds = np.random.choice(a=nc, size=num_envs, replace=replacement, p=weights)
+        inds = np.random.choice(a=nc, size=self.num_envs, replace=replacement, p=weights)
         part_states = self.curriculum[inds, :]
-
-        self.trajectories = [
-            [{
-                "state": part_state.copy(),
-                "reward": 0,
-                "stability": 1,
-            }] for part_state in part_states]
+        self.trajectories = [[{"state": part_state.copy(), "reward": 0, "stability": 1,}] for part_state in part_states]
         self.update_buffer = False
-        return part_states
+        return part_states, np.arange(env.num_envs)
 
     def simulate_buffer(self, simulate_remain=False):
-        self.timer.start("simulation")
         while len(self.sim_buffer):
-            num_to_sim = min(self.buffer_size, len(self.sim_buffer))
-            if num_to_sim < self.buffer_size and not simulate_remain:
+
+            num_to_sim = min(self.sim_buffer_size, len(self.sim_buffer))
+            if num_to_sim < self.sim_buffer_size and not simulate_remain:
                 break
             part_states = np.vstack(self.sim_buffer[:num_to_sim])
+
+            self.timer.start("simulation")
             _, stable_flag = learn2assemble.simulator.simulate(self.parts, self.contacts, part_states, self.settings)
+            elapse, _ = self.timer.stop("simulation", True)
+            print(f"num_sim {part_states.shape[0]}, \t avg_sim {round(elapse / part_states.shape[0], 4)}")
+
             stable_flag = stable_flag.astype(np.int32) * 2 - 1
             self.add_stability_history(part_states, stable_flag)
             self.sim_buffer = self.sim_buffer[num_to_sim:]
             self.update_buffer = True
-        self.timer.stop("simulation", True)
 
     def sample_actions(self, part_states: np.ndarray):
         masks = self.action_masks(part_states)
@@ -224,7 +238,7 @@ class DisassemblyEnv:
         return  np.array(env_inds)
 
 if __name__ == "__main__":
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
     from learn2assemble.render import *
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import torch
@@ -238,37 +252,46 @@ if __name__ == "__main__":
             "density": 1E4,
             "mu": 0.55,
             "velocity_tol": 1e-2,
-            "boundary_part_ids": [0],
             "verbose": False,
         },
-        "admm": {
-            "Ccp": 1E6,
-            "evaluate_it": 200,
-            "max_iter": 2000,
-            "float_type": torch.float32,
+        "gurobi": {
+
+        },
+        # "admm": {
+        #     "Ccp": 1E6,
+        #     "evaluate_it": 100,
+        #     "max_iter": 1000,
+        #     "float_type": torch.float32,
+        # },
+        "env":{
+            "n_robot": 2,
+            "boundary_part_ids": [0],
+            "sim_buffer_size": 512,
+            "num_rollouts": 512,
         }
     }
 
-    num_envs = 100000
     contacts = compute_assembly_contacts(parts, settings)
-    env = DisassemblyEnv(parts, contacts, n_robot=2, sim_buffer_size=100000, settings=settings)
+    env = DisassemblyEnv(parts, contacts, settings=settings)
 
-    part_states = env.reset(num_envs=num_envs)
-    env_inds = np.arange(num_envs)
+    part_states, env_inds = env.reset()
     n_step = 0
     while True:
         current_part_states = part_states[env_inds, :]
         current_actions = env.sample_actions(current_part_states)
         new_states, rewards, stability = env.step(current_part_states, current_actions)
         part_states[env_inds, :] = new_states
+
         for id, env_id in enumerate(env_inds):
             env.trajectories[env_id].append({"state": new_states[id].copy(),
                                               "reward": rewards[id],
                                               "stability": stability[id]
                                               })
         env_inds = env.update_trajectories()
-        print(f"n_step {n_step},\t rollout {len(env_inds)}", end=",\t ")
-        print(f"sim {env.timer.accumulator['simulation']: .2f},\t history {env.timer.accumulator['history']: .2f}")
+
+        print(f"n_step {n_step},\t rollout {len(env_inds)}")
+        # print(f"sim {env.timer.accumulator['simulation']: .2f},\t history {env.timer.accumulator['history']: .2f}")
+
         n_step += 1
         if env_inds.shape[0] == 0:
             break

@@ -1,18 +1,20 @@
 import pickle
+from time import perf_counter
 from warnings import warn
 import torch
 from torch.distributions import Categorical
 import numpy as np
 from torch import nn
 import torch_geometric
-from learn2assemble.ppo.policy import ActorCriticGATG,ActorCriticMLP
-from learn2assemble.ppo.buffer import RolloutBufferGNN,RolloutBufferMLP
+from learn2assemble.graph import GFTFGraphConstructor
+from learn2assemble.policy import ActorCriticGATG,ActorCriticMLP
+from learn2assemble.buffer import RolloutBufferGNN, RolloutBufferMLP
 from time import perf_counter
 import wandb
 
-intType = torch.long
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+intType = torch.int32
 
 class PPO:
     def __init__(self, metadata, state_dim, action_dim, config,n_curriculums):
@@ -38,7 +40,6 @@ class PPO:
         self.batch_graph_time = 0
         self.build_graph_time = 0
         self.build_ds_time = 0
-
     def init_policy(self,metadata, state_dim, action_dim, config,n_curriculums):
 
         self.buffer = RolloutBufferMLP(self.gamma, config.her,n_curriculums,config.entropy_weight,config.entropy_slope,config.max_entropy_weight,num_step_anneal=config.num_step_anneal)
@@ -75,7 +76,7 @@ class PPO:
             self.buffer.add(name, variables[id], env_inds)
         return action
 
-    def reset_assembly(self, assembly: AssemblyStability):
+    def reset_assembly(self, parts, contacts):
         pass
 
     def set_deterministic_policy(self, status = False):
@@ -230,12 +231,12 @@ class PPO_GAT(PPO):
             self.policy_old.load_state_dict(self.policy.state_dict())
 
     
-    def reset_assembly(self, assembly: AssemblyStability):
-        self.assembly = assembly
+    def reset_assembly(self, parts, contacts):
+
         """if wandb.config.policy_type == 'ziqi':
             self.graph_constructor = FTGraphConstructor(self.assembly)
         elif wandb.config.policy_type == 'gabriel':"""
-        self.graph_constructor = GFTFGraphConstructor(self.assembly)
+        self.graph_constructor = GFTFGraphConstructor(parts, contacts)
        
     def select_action(self, bin_states, masks, env_inds,curriculum_inds):
         # build graphs
@@ -261,6 +262,7 @@ class PPO_GAT(PPO):
         for id, name in enumerate(namelist):
             self.buffer.add(name, variables[id], env_inds)
         return action
+
     def compute_policy(self, bin_states, masks):
         # build graphs
         start_timer = perf_counter()
@@ -283,6 +285,7 @@ class PPO_GAT(PPO):
         dist = Categorical(action_probs)
         action = dist.sample()
         return action, action_probs, state_val
+
     def reset_optim(self):
         self.optimizer_params['lr'],*_ = self.scheduler.get_last_lr()
         self.optimizer = torch.optim.Adam([self.optimizer_params])

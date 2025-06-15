@@ -2,8 +2,11 @@ import numpy as np
 import torch
 import torch_geometric
 import wandb
-from stability.ppo.helper import *
 from torch.cuda import Stream
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+floatType = torch.float32
+intType = torch.int32
 class RolloutDatasetMLP(torch.utils.data.Dataset):
     def __init__(self,batch_size=100):
         super(RolloutDatasetMLP, self).__init__()
@@ -66,6 +69,7 @@ class RolloutDatasetMLP(torch.utils.data.Dataset):
         self.curriculum_id = torch.hstack([self.curriculum_id, dataset.curriculum_id])
 
         self.nsamples = self.rewards.shape[0]
+
 class RolloutDatasetGNN(torch_geometric.data.Dataset):
 
     def __init__(self, transform=None, pre_transform=None,batch_size=100):
@@ -132,6 +136,7 @@ class RolloutDatasetGNN(torch_geometric.data.Dataset):
             self.weights[idx_start:idx_end].to(device,non_blocking=True),
             self.entropy_weights[idx_start:idx_end].to(device,non_blocking=True),
             self.curriculum_id[idx_start:idx_end].to(device,non_blocking=True))
+
 class RolloutBufferMLP:
     def __init__(self, gamma, her,num_curriculums,base_entropy_weight,entropy_weight_increase,max_entropy,max_loss=100,num_step_anneal = 100):
         self.n_robot = wandb.config.n_robot

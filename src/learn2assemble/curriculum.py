@@ -4,7 +4,7 @@ from scipy.cluster.vq import kmeans2
 from trimesh import Trimesh
 import learn2assemble.simulator
 import time
-
+from learn2assemble import set_default
 
 def cluster(part_states: np.ndarray,
             prev_inds: np.ndarray,
@@ -34,7 +34,6 @@ def cluster(part_states: np.ndarray,
 
             # return result
             return part_states[min, :], prev_inds[min]
-
 
 def forward_install_actions(part_states: np.ndarray,
                             n_robot: int,
@@ -70,7 +69,6 @@ def forward_install_actions(part_states: np.ndarray,
 
     return new_states, prev_inds
 
-
 def forward_release_actions(part_states: np.ndarray,
                             boundary_part_ids: list = []):
     # nbatch x naction
@@ -98,7 +96,6 @@ def forward_release_actions(part_states: np.ndarray,
     prev_inds = prev_inds[flag]
 
     return new_states, prev_inds
-
 
 def forward_actions(part_states: np.ndarray,
                     n_robot: int,
@@ -141,20 +138,17 @@ def compute_solution(records):
 
 def forward_curriculum(parts: list[Trimesh],
                        contacts: list[dict],
-                       n_robot: int,
                        settings: dict = {}):
-    # create simulator
-    learn2assemble.simulator.init(parts, contacts, settings)
 
     # parameters
-    boundary_part_ids = settings["rbe"]["boundary_part_ids"]
-    search = set_default(settings,
-                         "search",
-                         {
-                             "n_beam": 64
-                         })
+    env = settings.get("env", {})
+    boundary_part_ids = env.get("boundary_part_ids", [])
+    n_robot = env.get("n_robot", 2)
+
+    search = set_default(settings,"search",{"n_beam": 64, "verbose": True})
 
     n_beam = search["n_beam"]
+    verbose = search["verbose"]
 
     # init states
     part_states = np.zeros((1, len(parts)), dtype=np.int32)
@@ -182,11 +176,12 @@ def forward_curriculum(parts: list[Trimesh],
 
         if verifying_flag.sum() > 0:
             timer = time.perf_counter()
-            _, stability_flag = learn2assemble.simulator.simulate(verifying_states, settings)
+            _, stability_flag = learn2assemble.simulator.simulate(parts, contacts, verifying_states, settings)
             n_sim = verifying_states.shape[0]
-            print("step:\t", iter,
-                  ",\t sim:\t", n_sim,
-                  ",\t time:\t", round((time.perf_counter() - timer) / n_sim, 3))
+            if verbose:
+                print("step:\t", iter,
+                      ",\t sim:\t", f"{np.sum(stability_flag)}/{n_sim}",
+                      ",\t time:\t", round((time.perf_counter() - timer) / n_sim, 4))
 
             if stability_flag.sum() > 0:
                 part_states = np.vstack([verifying_states[stability_flag, :], part_states])
@@ -211,31 +206,36 @@ if __name__ == '__main__':
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import torch
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
 
     settings = {
-        "contact_settings": {
-            "shrink_ratio": 0.1,
+        "contact_settings":
+        {
+            "shrink_ratio": 0.0,
         },
         "rbe": {
-            "density": 1E2,
+            "density": 1E4,
             "mu": 0.55,
             "velocity_tol": 1e-2,
-            "boundary_part_ids": [0],
             "verbose": False,
         },
         "admm": {
+            "Ccp": 1E6,
             "evaluate_it": 100,
             "max_iter": 1000,
             "float_type": torch.float32,
         },
-        "search": {
-            "n_beam": 64,
+        "search":{
+            "n_beam" : 256
+        },
+        "env":{
+            "boundary_part_ids": [0],
+            "n_robot": 2,
         }
     }
 
     contacts = compute_assembly_contacts(parts, settings)
-    succeed, solution, curriculum = forward_curriculum(parts, contacts, 2, settings)
+    succeed, solution, curriculum = forward_curriculum(parts, contacts, settings)
     print("succeed:\t", succeed)
 
     from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts

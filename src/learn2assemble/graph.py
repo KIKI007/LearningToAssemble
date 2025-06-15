@@ -1,170 +1,177 @@
-import torch
-from trimesh import Trimesh
+import networkx as nx
+import numpy as np
 from torch_geometric.data import HeteroData
-from types import SimpleNamespace
+import matplotlib.pyplot as plt
+from torch_geometric.utils import to_networkx
+import torch
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
-import networkx as nx
-from torch_geometric.utils import to_networkx
-import matplotlib.pyplot as plt
+intType = torch.int32
 
-def init_graph(parts: list[Trimesh],
-               contacts: list[dict],
-               settings: dict):
-    n_part = len(parts)
-    part_part_edge = []
-    part_x = torch.stack([torch.tensor([0,  # fixed
-                                        0,  # nonremove
-                                        parts[part_id].volume]  # mass
-                                       + parts[part_id].centroid.tolist(),  # centroid
-                                       device=device, dtype=floatType)
-                          for part_id in range(n_part)])
+class GFTFGraphConstructor:
+    def __init__(self, parts, contacts):
+        self.parts = parts
+        self.contacts = contacts
+        self.n_part = len(parts)
+        self.compute_full_graph()
 
-    centroid = torch.stack([torch.tensor(parts[part_id].centroid,  # centroid
-                                         device=device, dtype=floatType)
-                            for part_id in range(n_part)])
+    def _int(self, array):
+        return torch.tensor(array, device=device, dtype=torch.long)
 
-    mass = torch.stack([torch.tensor([parts[part_id].volume],
-                                     device=device, dtype=floatType)
-                        for part_id in range(n_part)])
+    def _float(self, array):
+        return torch.tensor(array, device=device, dtype=floatType)
 
-    force_x = []
-    force_part_ids = []
+    def _arange(self, n):
+        return torch.arange(start = 0, end = n, dtype=torch.long, device=device)
 
-    torque_x = []
-    torque_part_ids = []
-    torque_force_ids = []
+    def compute_full_graph(self):
+        self.part_part_edge = []
 
-    def iAB(iA, iB):
-        return torch.tensor([iA, iB], dtype=torch.long, device=device)
+        self.part_x = torch.stack([torch.tensor([0,#fixed
+                                                 0,#nonremove
+                                                 self.parts[part].volume]#mass
+                                                 +self.parts[part].centroid.tolist(),#centroid
+                                                 device=device, dtype=floatType)
+                                                 for part in range(self.n_part)])
+        #also save different features separatly so its easier to use some embedding
+        self.centroid = torch.stack([torch.tensor(self.parts[part].centroid,#centroid
+                                                 device=device, dtype=floatType)
+                                                 for part in range(self.n_part)])
+        self.mass = torch.stack([torch.tensor([self.parts[part].volume],
+                                                 device=device, dtype=floatType)
+                                                 for part in range(self.n_part)])
+        self.part_id = torch.arange(self.n_part,device = device)
+        self.part_state  = torch.zeros((self.n_part,2),dtype=torch.long,device=device)
+        
+        self.force_x = []
+        self.force_part_ids = []
 
-    for contact in contacts:
-        iA = contact["iA"]
-        iB = contact["iB"]
+        self.torque_x = []
+        self.torque_part_ids = []
+        self.torque_force_ids = []
 
-        # normal
-        n = contact["plane"][:3, 2]
-        fid = len(force_x)
-        force_x.append(torch.tensor(n, device=device, dtype=floatType))
+        for contact in self.contacts:
+            iA = contact["iA"]
+            iB = contact["iB"]
 
-        force_part_ids.append(iAB(iA, iB))
+            # normal
+            n = contact["plane"][:3, 2]
+            fid = len(self.force_x)
+            self.force_x.append(self._float(n))
+            self.force_part_ids.append(self._int([iA, iB]))
 
-        # points
-        pts = contact["mesh"].vertices
-        pts = torch.tensor(pts, device=device, dtype=floatType)
+            # points
+            pts = contact["mesh"].vertices
 
-        for pt in pts:
-            tauA = pt - centroid[iA]
-            tauB = pt - centroid[iB]
-            torque_x.append(tauA)
-            torque_part_ids.append(iAB(iA, iB))
-            torque_x.append(tauB)
-            torque_part_ids.append(iAB(iB, iA))
-            torque_force_ids += [fid, fid]
+            for pt in pts:
+                tauA = self._float(pt )- self.centroid[iA]
+                tauB = self._float(pt )- self.centroid[iB]
+                tA = len(self.torque_x)
+                tB = tA + 1
+                self.torque_x.append(tauA)
+                self.torque_part_ids.append(self._int([iA, iB]))
+                self.torque_x.append(tauB)
+                self.torque_part_ids.append(self._int([iB, iA]))
 
-    for iA in range(n_part):
-        for iB in range(n_part):
-            part_part_edge.append(iAB(iA, iB))
+                self.torque_force_ids+= [fid,fid]
 
-    graph = {}
-    graph["n_part"] = n_part
-    graph["part_x"] = part_x
-    graph["centroid"] = centroid
-    graph["mass"] = mass
-    graph["torque_x"] = torch.stack(torque_x)
-    graph["torque_part_ids"] = torch.stack(torque_part_ids)
-    graph["force_x"] = torch.stack(force_x)
-    graph["force_part_ids"] = torch.stack(force_part_ids)
-    graph["part_part_edge"] = torch.stack(part_part_edge)
-    graph["torque_force_ids"] = torch.tensor(torque_force_ids, device=device, dtype=torch.long)
-    settings["graph"] = graph
+            
+        for iA in range(self.n_part):
+            for iB in range(self.n_part):
+                self.part_part_edge.append(self._int([iA, iB]))
 
-def compute_graphs(part_states: torch.Tensor,
-                   settings: dict):
-    datalist = []
-    graph = SimpleNamespace(**settings["graph"])
-    n_part = graph.n_part
+        self.torque_x = torch.stack(self.torque_x)
+        self.torque_part_ids = torch.stack(self.torque_part_ids)
+        self.force_x = torch.stack(self.force_x)
+        self.force_part_ids = torch.stack(self.force_part_ids)
+        self.part_part_edge = torch.stack(self.part_part_edge)
+        self.torque_force_ids = self._int(self.torque_force_ids)
 
-    for id in range(part_states.shape[0]):
-        data = HeteroData()
-        part_id = torch.arange(0, n_part, dtype=torch.long, device=device)
-        part_state = part_states[id, :]
-        install_state = part_states[id, :, 0].to(bool)
-        # part nodes
-        data["part"].x = graph.part_x.detach().clone()
-        data["part"].x[:, 0] = (part_state[:, 1]).type(floatType)
-        data["part"].x[:, 1] = (part_state[:, 2]).type(floatType)
-        data["part"].x = data["part"].x[install_state, :]
-        data["part"].part_id = part_id[install_state]
-        data["part"].centroid = graph.centroid[install_state]
-        data["part"].mass = graph.mass[install_state]
-        data["part"].part_state = part_state[install_state, 1:]
-        # force nodes
-        force_state = install_state[graph.force_part_ids[:, 0]] * install_state[graph.force_part_ids[:, 1]]
-        data["force"].x = graph.force_x.detach().clone()
-        data["force"].x = data["force"].x[force_state, :]
 
-        # torque nodes
-        torque_state = install_state[graph.torque_part_ids[:, 0]] * install_state[graph.torque_part_ids[:, 1]]
-        data["torque"].x = graph.torque_x.detach().clone()
-        data["torque"].x = data["torque"].x[torque_state, :]
+    def graphs(self, part_states: np.ndarray):
+        datalist = []
+        for id in range(part_states.shape[0]):
+            data = HeteroData()
 
-        # part part edge
-        part_part_state = install_state[graph.part_part_edge[:, 0]] * install_state[graph.part_part_edge[:, 1]]
-        edge = graph.part_part_edge[part_part_state, :].detach().clone()
-        map_part = torch.zeros(graph.n_part, dtype=torch.long, device=device)
-        map_part[data["part"].part_id] = torch.arange(0, data["part"].x.shape[0], device=device, dtype=torch.long)
-        edge = map_part[edge]
-        data["part", "pp", "part"].edge_index = edge.detach().clone().t().contiguous()
+            part_state = torch.tensor(part_states[id, :], device=device, dtype=torch.int32)
+            install_state = (part_state >= 1).type(torch.bool)
+            held_state = (part_state == 2).type(torch.bool)
+            nonremove_state = torch.zeros(part_state.shape[0], device=device, dtype=torch.bool)
+            part_state = torch.hstack([install_state.reshape(-1, 1), held_state.reshape(-1, 1), nonremove_state.reshape(-1, 1)])
 
-        # torque torque edge
-        tA = torch.arange(0, data["torque"].x.shape[0] // 2, device=device, dtype=torch.long) * 2
-        tB = tA + 1
-        edge = torch.hstack([torch.vstack([tA, tB]), torch.vstack([tB, tA])])
-        data["torque", "tt", "torque"].edge_index = edge.contiguous()
+            # part nodes
+            data["part"].x = self.part_x.detach().clone()
+            data["part"].x[:, 0] = (part_state[:,1]).type(floatType)
+            data["part"].x[:, 1] = (part_state[:,2]).type(floatType)
+            data["part"].x = data["part"].x[install_state, :]
+            data["part"].part_id = self._arange(self.n_part)[install_state]
+            data["part"].centroid = self.centroid[install_state]
+            data["part"].mass = self.mass[install_state]
+            data["part"].part_state = part_state[install_state,1:]
+            # force nodes
+            force_state = install_state[self.force_part_ids[:, 0]] * install_state[self.force_part_ids[:, 1]]
+            data["force"].x = self.force_x.detach().clone()
+            data["force"].x = data["force"].x[force_state, :]
 
-        # part torque edge
-        tid = torch.arange(0, data["torque"].x.shape[0], device=device, dtype=torch.long)
-        pid = map_part[graph.torque_part_ids[torque_state, 0]]
-        edge = torch.vstack([pid, tid])
-        data["part", "pt", "torque"].edge_index = edge.contiguous()
-        data["torque", "rev_pt", "part"].edge_index = edge[[1, 0], :].contiguous()
+            # torque nodes
+            torque_state = install_state[self.torque_part_ids[:, 0]] * install_state[self.torque_part_ids[:, 1]]
+            data["torque"].x = self.torque_x.detach().clone()
+            data["torque"].x = data["torque"].x[torque_state, :]
 
-        # part force plus edge
-        fid = torch.arange(0, data["force"].x.shape[0], device=device, dtype=torch.long)
-        pid = map_part[graph.force_part_ids[force_state, 0]]
-        edge = torch.vstack([pid, fid])
-        data["part", "pfplus", "force"].edge_index = edge.contiguous()
-        data["force", "rev_pfplus", "part"].edge_index = edge[[1, 0], :].contiguous()
+            # part part edge
+            part_part_state = install_state[self.part_part_edge[:, 0]] * install_state[self.part_part_edge[:, 1]]
+            edge = self.part_part_edge[part_part_state, :].detach().clone()
+            map_part = torch.zeros(self.n_part, dtype=torch.long, device=device)
+            map_part[data["part"].part_id] = self._arange(data["part"].x.shape[0])
+            edge = map_part[edge]
+            data["part", "pp", "part"].edge_index = edge.detach().clone().t().contiguous()
 
-        # part force minus edge
-        pid = map_part[graph.force_part_ids[force_state, 1]]
-        edge = torch.vstack([pid, fid])
-        data["part", "pfminus", "force"].edge_index = edge.contiguous()
-        data["force", "rev_pfminus", "part"].edge_index = edge[[1, 0], :].contiguous()
+            # torque torque edge
+            tA = self._arange(data["torque"].x.shape[0] // 2) * 2
+            tB = tA + 1
+            edge = torch.hstack([torch.vstack([tA, tB]), torch.vstack([tB, tA])])
+            data["torque", "tt", "torque"].edge_index = edge.contiguous()
 
-        # force torque edge
-        fid = graph.torque_force_ids[torque_state]
-        force_id = torch.arange(0, graph.force_x.shape[0], device=device, dtype=torch.long)
-        force_id = force_id[force_state]
-        map_force = torch.zeros(graph.force_x.shape[0], dtype=torch.long, device=device)
-        map_force[force_id] = torch.arange(0, data["force"].x.shape[0], device=device, dtype=torch.long)
-        fid = map_force[fid]
-        tid = torch.arange(0, data["torque"].x.shape[0], device=device, dtype=torch.long)
-        edge = torch.vstack([fid, tid])
-        data["force", "ft", "torque"].edge_index = edge.contiguous()
-        data["torque", "rev_ft", "force"].edge_index = edge[[1, 0], :].contiguous()
+            # part torque edge
+            tid = self._arange(data["torque"].x.shape[0])
+            pid = map_part[self.torque_part_ids[torque_state, 0]]
+            edge = torch.vstack([pid, tid])
+            data["part", "pt", "torque"].edge_index = edge.contiguous()
+            data["torque", "rev_pt", "part"].edge_index = edge[[1, 0], :].contiguous()
 
-        data["part", "is", "part"].edge_index = torch.stack([torch.arange(data["part"].x.shape[0], device=device),
-                                                             torch.arange(data["part"].x.shape[0], device=device)])
-        data["force", "is", "force"].edge_index = torch.stack(
-            [torch.arange(data["force"].x.shape[0], device=device),
-             torch.arange(data["force"].x.shape[0], device=device)])
-        data["torque", "is", "torque"].edge_index = torch.stack(
-            [torch.arange(data["torque"].x.shape[0], device=device),
-             torch.arange(data["torque"].x.shape[0], device=device)])
-        datalist.append(data)
-    return datalist
+            # part force plus edge
+            fid = self._arange(data["force"].x.shape[0])
+            pid = map_part[self.force_part_ids[force_state, 0]]
+            edge = torch.vstack([pid, fid])
+            data["part", "pfplus", "force"].edge_index = edge.contiguous()
+            data["force", "rev_pfplus", "part"].edge_index = edge[[1, 0], :].contiguous()
+
+            # part force minus edge
+            pid = map_part[self.force_part_ids[force_state, 1]]
+            edge = torch.vstack([pid, fid])
+            data["part", "pfminus", "force"].edge_index = edge.contiguous()
+            data["force", "rev_pfminus", "part"].edge_index = edge[[1, 0], :].contiguous()
+
+            # force torque edge
+            fid = self.torque_force_ids[torque_state]
+            force_id = self._arange(self.force_x.shape[0])[force_state]
+            map_force = torch.zeros(self.force_x.shape[0], dtype=torch.long, device=device)
+            map_force[force_id] = self._arange(data["force"].x.shape[0])
+            fid = map_force[fid]
+            tid = self._arange(data["torque"].x.shape[0])
+            edge = torch.vstack([fid, tid])
+            data["force", "ft", "torque"].edge_index = edge.contiguous()
+            data["torque", "rev_ft", "force"].edge_index = edge[[1, 0], :].contiguous()
+            
+            data["part", "is", "part"].edge_index = torch.stack([torch.arange(data["part"].x.shape[0],device=device),
+                                                                   torch.arange(data["part"].x.shape[0],device=device)])
+            data["force", "is", "force"].edge_index = torch.stack([torch.arange(data["force"].x.shape[0],device=device),
+                                                                   torch.arange(data["force"].x.shape[0],device=device)])
+            data["torque", "is", "torque"].edge_index = torch.stack([torch.arange(data["torque"].x.shape[0],device=device),
+                                                                   torch.arange(data["torque"].x.shape[0],device=device)])
+            datalist.append(data)
+        return datalist
 
 def draw_pygdata(PyGdata: HeteroData, k = 1, iter = 10000):
     graph = to_networkx(PyGdata, to_undirected=False)
@@ -241,17 +248,18 @@ def draw_pygdata(PyGdata: HeteroData, k = 1, iter = 10000):
     plt.show()
 
 if __name__ == "__main__":
-    from learn2assemble import RESOURCE_DIR
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    parts = load_assembly_from_files(RESOURCE_DIR + "/assembly/arch")
-    settings = {}
-    contacts = compute_assembly_contacts(parts, settings)
-    init_graph(parts, contacts, settings)
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR
 
-    bin_states = torch.zeros((1, len(parts), 3), device=device, dtype=torch.long)
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/arch")
+    contacts = compute_assembly_contacts(parts)
+
+    graph_constructor = GFTFGraphConstructor(parts, contacts)
+
+    bin_states = torch.zeros((1, len(parts), 3), device=device, dtype=intType)
     bin_states[0, 0, 0] = 1
     bin_states[0, 1, 0] = 1
     bin_states[0, 1, 1] = 1
     bin_states[0, 1, 2] = 2
-    graphs = compute_graphs(bin_states, settings)
+    graphs = graph_constructor.graphs(bin_states)
     draw_pygdata(graphs[0], iter = 500)

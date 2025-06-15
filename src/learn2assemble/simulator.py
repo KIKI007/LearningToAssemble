@@ -58,7 +58,6 @@ def init_admm(parts: list[Trimesh],
     settings["admm"] = admm
 
 
-@torch.compile
 def admm_step(xk, yk, zk, qk, zlk, zuk, Ah, AhT, inv_lhs, r, sigma, alpha, evaluate_iter):
     with torch.no_grad():
         for it in range(evaluate_iter):
@@ -223,11 +222,6 @@ if __name__ == '__main__':
     import polyscope as ps
 
     init_polyscope()
-    # parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
-    # part_states = np.ones((1, len(parts)))
-    # b = len(parts) - 1
-    # part_states[0, b] = 2
-
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     part_states = np.zeros((1, len(parts)))
     part_states[0, 3] = 1
@@ -243,7 +237,6 @@ if __name__ == '__main__':
             "density": 1E2,
             "mu": 0.55,
             "velocity_tol": 1e-2,
-            "boundary_part_ids": [b],
             "verbose": False,
         },
         "admm": {
@@ -251,6 +244,9 @@ if __name__ == '__main__':
             "evaluate_it": 200,
             "max_iter": 3000,
             "float_type": torch.float32,
+        },
+        "env": {
+            "boundary_part_ids": [],
         }
     }
 

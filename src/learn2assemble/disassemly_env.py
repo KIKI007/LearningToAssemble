@@ -243,7 +243,7 @@ if __name__ == "__main__":
             "density": 1E4,
             "mu": 0.55,
             "velocity_tol": 1e-2,
-            "verbose": False,
+            "verbose": True,
         },
         "admm": {
             "Ccp": 1E6,

@@ -228,7 +228,7 @@ if __name__ == "__main__":
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import torch
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
     settings = {
         "contact_settings": {
             "shrink_ratio": 0.0,
@@ -236,11 +236,11 @@ if __name__ == "__main__":
         "env": {
             "n_robot": 2,
             "boundary_part_ids": [0],
-            "sim_buffer_size": 1024,
-            "num_rollouts": 10240,
+            "sim_buffer_size": 1024*16,
+            "num_rollouts": 100000,
         },
         "rbe": {
-            "density": 1E2,
+            "density": 1E4,
             "mu": 0.55,
             "velocity_tol": 1e-2,
             "verbose": False,
@@ -250,44 +250,20 @@ if __name__ == "__main__":
             "evaluate_it": 100,
             "max_iter": 1000,
             "float_type": torch.float32,
-        },
-        "search": {
-            "n_beam": 64,
-        },
-        "policy": {
-            "gat_layers": 8,
-            "gat_heads": 1,
-            "gat_hidden_dims": 16,
-            "gat_dropout": 0.0,
-            "centroids": False
-        },
-        "ppo": {
-            "gamma": 0.95,
-            "eps_clip": 0.2,
-
-            "base_entropy_weight": 0.005,
-            "entropy_weight_increase": 0.001,
-            "max_entropy_weight": 0.01,
-
-            "lr_milestones": [100, 300],
-            "num_step_anneal": 500,
-            "lr_actor": 2e-3,
-            "betas_actor": [0.95, 0.999],
         }
     }
 
     contacts = compute_assembly_contacts(parts, settings)
     env = DisassemblyEnv(parts, contacts, settings=settings)
-    ppo_config = SimpleNamespace(**settings["ppo"])
 
     part_states, env_inds = env.reset()
     buffer = RolloutBufferGNN(n_robot=env.n_robot,
                               num_curriculums=1,
-                              gamma=ppo_config.gamma,
-                              base_entropy_weight=ppo_config.base_entropy_weight,
-                              entropy_weight_increase=ppo_config.entropy_weight_increase,
-                              max_entropy_weight=ppo_config.max_entropy_weight,
-                              num_step_anneal=ppo_config.num_step_anneal)
+                              gamma=0,
+                              base_entropy_weight=0,
+                              entropy_weight_increase=0,
+                              max_entropy_weight=0,
+                              num_step_anneal=1)
     buffer.clear(env.num_rollouts)
     n_step = 0
     while True:
@@ -312,34 +288,34 @@ if __name__ == "__main__":
     env.simulate_buffer(True)
     _, rewards = buffer.get_valid_env_inds(env)
 
-    import polyscope as ps
-    env_id = 0
-    step_id = 0
-    init_polyscope()
-
-    solutions = []
-    max_steps = 0
-
-    for env_ind in range(env.num_rollouts):
-        if rewards[env_ind] > 0:
-            list = buffer.next_states[env_ind].copy()
-            list.reverse()
-            solutions.append(list)
-
-    def interact():
-        global step_id, env_id
-        render = False
-        changed, env_id = psim.SliderInt("env", v=env_id, v_min=0, v_max=len(solutions) - 1)
-        if changed:
-            step_id = 0
-        render = render or changed
-        changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=len(solutions[env_id]) - 1)
-        render = render or changed
-        if render:
-            ps.remove_all_structures()
-            ps.remove_all_groups()
-            draw_assembly(parts, solutions[env_id][step_id])
-
-    draw_assembly(parts, env.curriculum[0])
-    ps.set_user_callback(interact)
-    ps.show()
+    # import polyscope as ps
+    # env_id = 0
+    # step_id = 0
+    # init_polyscope()
+    #
+    # solutions = []
+    # max_steps = 0
+    #
+    # for env_ind in range(env.num_rollouts):
+    #     if rewards[env_ind] > 0:
+    #         list = buffer.next_states[env_ind].copy()
+    #         list.reverse()
+    #         solutions.append(list)
+    #
+    # def interact():
+    #     global step_id, env_id
+    #     render = False
+    #     changed, env_id = psim.SliderInt("env", v=env_id, v_min=0, v_max=len(solutions) - 1)
+    #     if changed:
+    #         step_id = 0
+    #     render = render or changed
+    #     changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=len(solutions[env_id]) - 1)
+    #     render = render or changed
+    #     if render:
+    #         ps.remove_all_structures()
+    #         ps.remove_all_groups()
+    #         draw_assembly(parts, solutions[env_id][step_id])
+    #
+    # draw_assembly(parts, env.curriculum[0])
+    # ps.set_user_callback(interact)
+    # ps.show()

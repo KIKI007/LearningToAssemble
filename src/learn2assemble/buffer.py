@@ -18,7 +18,7 @@ class RolloutDatasetGNN(torch_geometric.data.Dataset):
         self.tos = Stream(device)
 
     def __getitem__(self, idx):
-            if idx < len(self)-1:
+            if idx < len(self) - 1:
                 return self.batch_data_from_to(idx*self.batch_size,(idx+1)*self.batch_size)
             else:
                 return self.batch_data_from_to(idx*self.batch_size,len(self.states))

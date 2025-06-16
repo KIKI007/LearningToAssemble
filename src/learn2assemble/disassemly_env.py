@@ -41,6 +41,7 @@ class DisassemblyEnv:
                                        "sim_buffer_size": 64,
                                        "num_rollouts": 64,
                                        "seed": 0,
+                                       "name": "example",
                                        "verbose": False,
                                    })
 

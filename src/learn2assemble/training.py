@@ -15,6 +15,7 @@ from learn2assemble.agent import PPO
 
 from trimesh import Trimesh
 import numpy as np
+import time
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
@@ -57,7 +58,7 @@ def save_policy(ppo_agent, env, accuracy, training_settings):
     delta_accuracy = training_settings.save_delta_accuracy
     if accuracy > ppo_agent.saved_accuracy + delta_accuracy:
         ppo_agent.saved_accuracy = accuracy
-        folder_path = "./models/"
+        folder_path = f"./models/f{env.settings['env']['name']}"
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)  # Create the folder
         model_path = f"{folder_path}/policy.pol"
@@ -82,8 +83,8 @@ def update_stats(ppo_agent, curriculum_inds: np.ndarray, training_settings, accu
     ppo_agent.print_iter = ppo_agent.print_iter + 1
     print_epoch = training_settings.print_epochs
     if ppo_agent.print_iter % print_epoch == print_epoch - 1:
-        print()
-        print("Episode : {} \t\t Accuracy : {} ".format(ppo_agent.episode, round(accuracy, 2)))
+        elaspe = time.perf_counter() - ppo_agent.episode_timer
+        print("Episode : {} \t\t Accuracy : {}\t\t Time : {:.2f}".format(ppo_agent.episode, round(accuracy, 2), elaspe))
         #print("Failed Curriculum: {}".format(curriculum_inds[ppo_agent.buffer.rewards < 0]))
 
 
@@ -148,7 +149,9 @@ def train(parts, contacts, settings):
     assert ppo_agent.buffer.curriculum_rank.shape[0] == env.curriculum.shape[0]
 
     # training
+
     while ppo_agent.episode <= training_settings.max_train_epochs and ppo_agent.saved_accuracy < 1:
+        ppo_agent.episode_timer = time.perf_counter()
         curriculum_inds = sample_curriculum(ppo_agent, env.num_rollouts)
         ppo_agent.buffer.curriculum_inds = curriculum_inds
         ppo_agent.buffer.rewards = rollout_asyn(ppo_agent, env, curriculum_inds)
@@ -165,67 +168,3 @@ def train(parts, contacts, settings):
         # policy update
         policy_update(ppo_agent, training_settings)
         ppo_agent.episode = ppo_agent.episode + 1
-
-
-if __name__ == "__main__":
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
-    from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    import torch
-
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
-    settings = {
-        "contact_settings": {
-            "shrink_ratio": 0.0,
-        },
-        "env": {
-            "n_robot": 2,
-            "boundary_part_ids": [0],
-            "sim_buffer_size": 512,
-            "num_rollouts": 512,
-            "verbose": False,
-        },
-        "rbe": {
-            "density": 1E2,
-            "mu": 0.55,
-            "velocity_tol": 1e-2,
-            "verbose": False,
-        },
-        "admm": {
-            "Ccp": 1E6,
-            "evaluate_it": 100,
-            "max_iter": 1000,
-            "float_type": torch.float32,
-        },
-        "search": {
-            "n_beam": 64,
-        },
-        "policy": {
-            "gat_layers": 8,
-            "gat_heads": 1,
-            "gat_hidden_dims": 16,
-            "gat_dropout": 0.0,
-            "centroids": False
-        },
-        "ppo": {
-            "gamma": 0.95,
-            "eps_clip": 0.2,
-
-            "base_entropy_weight": 0.005,
-            "entropy_weight_increase": 0.001,
-            "max_entropy_weight": 0.01,
-
-            "lr_milestones": [100, 300],
-            "num_step_anneal": 500,
-            "lr_actor": 2e-3,
-            "betas_actor": [0.95, 0.999],
-        },
-        "training": {
-            "max_train_epochs": 50000,
-            "save_delta_accuracy": 0.01,
-            "print_epochs": 1,
-            "policy_update_batch_size": 2048,
-            "K_epochs": 5
-        }
-    }
-    contacts = compute_assembly_contacts(parts, settings)
-    train(parts, contacts, settings)

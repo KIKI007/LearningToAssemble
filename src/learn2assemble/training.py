@@ -149,9 +149,8 @@ def train(parts, contacts, settings):
     assert ppo_agent.buffer.curriculum_rank.shape[0] == env.curriculum.shape[0]
 
     # training
-
+    ppo_agent.episode_timer = time.perf_counter()
     while ppo_agent.episode <= training_settings.max_train_epochs and ppo_agent.saved_accuracy < 1:
-        ppo_agent.episode_timer = time.perf_counter()
         curriculum_inds = sample_curriculum(ppo_agent, env.num_rollouts)
         ppo_agent.buffer.curriculum_inds = curriculum_inds
         ppo_agent.buffer.rewards = rollout_asyn(ppo_agent, env, curriculum_inds)
@@ -161,6 +160,7 @@ def train(parts, contacts, settings):
 
         # update number of fails
         update_stats(ppo_agent, curriculum_inds, training_settings, accuracy)
+        ppo_agent.episode_timer = time.perf_counter()
 
         # save model
         save_policy(ppo_agent, env, accuracy, training_settings)

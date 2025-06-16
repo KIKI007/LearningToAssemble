@@ -21,7 +21,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
 
-def rollout_asyn(ppo_agent, env, curriculum_inds):
+def training_rollout(ppo_agent, env, curriculum_inds):
     part_states = env.curriculum[curriculum_inds, :]
     ppo_agent.buffer.clear(part_states.shape[0])
     n_env = part_states.shape[0]
@@ -63,7 +63,7 @@ def train(parts, contacts, settings):
     training_settings = SimpleNamespace(**training_settings)
 
     # policy output folder
-    folder_path = f"./models/f{training_settings.output_name}"
+    folder_path = f"./models/{training_settings.output_name}"
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)  # Create the folder
     saved_model_path = f"{folder_path}/policy.pol"
@@ -88,7 +88,7 @@ def train(parts, contacts, settings):
     while ppo_agent.episode <= training_settings.max_train_epochs and ppo_agent.saved_accuracy < 1:
         curriculum_inds = ppo_agent.buffer.sample_curriculum(env.num_rollouts)
         ppo_agent.buffer.curriculum_inds = curriculum_inds
-        ppo_agent.buffer.rewards = rollout_asyn(ppo_agent, env, curriculum_inds)
+        ppo_agent.buffer.rewards = training_rollout(ppo_agent, env, curriculum_inds)
 
         # update entropy weights
         rewards = ppo_agent.buffer.rewards

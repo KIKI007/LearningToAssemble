@@ -13,7 +13,7 @@ settings = {
         "n_robot": 2,
         "boundary_part_ids": [0],
         "sim_buffer_size": 512,
-        "num_rollouts": 512,
+        "num_rollouts": 1024,
         "verbose": False,
     },
     "rbe": {
@@ -25,7 +25,7 @@ settings = {
     "admm": {
         "Ccp": 1E6,
         "evaluate_it": 200,
-        "max_iter": 2000,
+        "max_iter": 1000,
         "float_type": torch.float32,
     },
     "search": {

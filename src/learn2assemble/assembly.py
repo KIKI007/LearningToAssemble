@@ -228,14 +228,14 @@ if __name__ == '__main__':
 
     init_polyscope()
     settings = {
-        # "contact_settings": {
-        #     "dist_tol": 1E-3,
-        #     "nrm_tol": 1E-3,
-        #     "area_tol": 1E-5,
-        #     "simplify_tol": 1E-4,
-        #     "shrink_ratio": 0.1,
-        #     "collision_scale": 1.1
-        # }
+        "contact_settings": {
+            "dist_tol": 1E-3,
+            "nrm_tol": 1E-3,
+            "area_tol": 1E-5,
+            "simplify_tol": 1E-4,
+            "shrink_ratio": 0.1,
+            "collision_scale": 1.1
+        }
     }
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     part_states = np.ones(len(parts))

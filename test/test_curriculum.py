@@ -18,12 +18,12 @@ def test_curriculum():
         },
         "admm": {
             "Ccp": 1E6,
-            "evaluate_it": 200,
-            "max_iter": 2000,
+            "evaluate_it": 100,
+            "max_iter": 1000,
             "float_type": torch.float32,
         },
         "search": {
-            "n_beam": 64
+            "n_beam": 64,
             "verbose": False,
         },
         "env": {

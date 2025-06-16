@@ -42,7 +42,7 @@ def rollout_asyn(ppo_agent, env, curriculum_inds):
         ppo_agent.buffer.add("next_stability", next_stability, env_inds)
 
         env_inds, _ = ppo_agent.buffer.get_valid_env_inds(env)
-        print(f"n_step {n_step},\t rollout {len(env_inds)}")
+        #print(f"n_step {n_step},\t rollout {len(env_inds)}")
         n_step = n_step + 1
 
         if env_inds.shape[0] == 0:
@@ -83,10 +83,8 @@ def update_stats(ppo_agent, curriculum_inds: np.ndarray, training_settings, accu
     print_epoch = training_settings.print_epochs
     if ppo_agent.print_iter % print_epoch == print_epoch - 1:
         print()
-        print("Episode : {} \t\t Accuracy : {} \t\t Reward : {}".format(ppo_agent.episode,
-                                                                        round(accuracy, 2),
-                                                                        round(avg_reward, 2)))
-        print("Failed Curriculum: {}".format(curriculum_inds[ppo_agent.buffer.rewards < 0]))
+        print("Episode : {} \t\t Accuracy : {} ".format(ppo_agent.episode, round(accuracy, 2)))
+        #print("Failed Curriculum: {}".format(curriculum_inds[ppo_agent.buffer.rewards < 0]))
 
 
 def policy_check(ppo_agent, curriculum_inds):
@@ -94,7 +92,6 @@ def policy_check(ppo_agent, curriculum_inds):
     num_envs = curriculum_inds.shape[0]
     # compute accuracy
     accuracy = (num_success / num_envs)
-    print("training accuracy\t", accuracy)
     return accuracy.item()
 
 
@@ -140,8 +137,8 @@ def train(parts, contacts, settings):
     # create ppo agent
     env = DisassemblyEnv(parts, contacts, settings=settings)
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
-    # _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
-    # env.set_curriculum(curriculum)
+    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
+    env.set_curriculum(curriculum)
     ppo_agent = PPO(env, settings)
 
     print(f"Start training, curriculum: {env.curriculum.shape[0]}")
@@ -184,7 +181,8 @@ if __name__ == "__main__":
             "n_robot": 2,
             "boundary_part_ids": [0],
             "sim_buffer_size": 512,
-            "num_rollouts": 128,
+            "num_rollouts": 512,
+            "verbose": False,
         },
         "rbe": {
             "density": 1E2,

@@ -13,74 +13,74 @@ intType = torch.int32
 
 
 class GATGFTFSharedEncoder(nn.Module):
-    def __init__(self, metadata, n_part, hidden_channels=8, heads=3, num_layers=4, out_channels=2, dropout=0.,
+    def __init__(self, metadata,
+                 n_part,
+                 hidden_channels=8,
+                 heads=3,
+                 num_layers=4,
+                 dropout=0,
                  centroids=False):
         super().__init__()
-        n_layers_full = 1
-        n_neurons_full = hidden_channels
         self.centroids = centroids
         self.n_part = n_part
-        self.embedding_parts = torch.nn.Linear(1, hidden_channels // 2, device=device, bias=False)
-        self.embedding_state = torch.nn.Embedding(4, hidden_channels // 2, device=device)
+        self.embedding_part_geom = torch.nn.Linear(1, hidden_channels // 2, device=device, bias=False)
+        self.embedding_part_state = torch.nn.Embedding(4, hidden_channels // 2, device=device)
 
-        # self.bnin = torch.nn.BatchNorm1d(config['n_neurons'],device=self.device)
+        # shared gat
         self.convs = torch_geometric.nn.models.GAT(in_channels=(-1, -1), hidden_channels=hidden_channels,
                                                    out_channels=hidden_channels, heads=1, dropout=dropout,
                                                    num_layers=num_layers, add_self_loops=False)
 
         self.convs = torch_geometric.nn.to_hetero(self.convs, metadata, aggr='sum').to(device)
 
-        self.convActor = torch_geometric.nn.models.GAT(in_channels=hidden_channels,
-                                                       heads=1,
-                                                       hidden_channels=hidden_channels,
-                                                       # out_channels = 2,
-                                                       dropout=dropout, num_layers=1, add_self_loops=False)
-        self.convActor = torch_geometric.nn.to_hetero(self.convActor, metadata, aggr='sum').to(device)
-        k = 3
-        self.aggr = aggr.MultiAggregation([aggr.MaxAggregation(), aggr.MinAggregation(),
-                                           aggr.MeanAggregation()])  # aggr.MedianAggregation().to(self.device)
-        self.bn = torch.nn.BatchNorm1d(hidden_channels * k * 3, device=device)
-        self.innet = torch.nn.Linear(3 * k * hidden_channels, n_neurons_full, device=device)
-        self.full_net = torch.nn.ModuleList(
-            [nn.Linear(n_neurons_full, n_neurons_full, device=device) for i in range(n_layers_full)])
-        self.outnet = torch.nn.Linear(n_neurons_full, 1, device=device)
-        self.ln = torch_geometric.nn.LayerNorm(hidden_channels, mode='node')
-        self.out_a = torch.nn.Linear(hidden_channels, out_channels)
+        # actor
+        self.actor_convs = torch_geometric.nn.models.GAT(in_channels=hidden_channels,
+                                                         heads=1,
+                                                         hidden_channels=hidden_channels,
+                                                         dropout=dropout, num_layers=1, add_self_loops=False)
+        self.actor_convs = torch_geometric.nn.to_hetero(self.actor_convs, metadata, aggr='sum').to(device)
+        self.actor_layernrm = torch_geometric.nn.LayerNorm(hidden_channels, mode='node')
+        self.actor_out = torch.nn.Linear(hidden_channels, 2)
+
+        # critic
+        aggr_dim = 3
+        node_types = 3
+        num_mlp_critic = 1
+        self.aggr = aggr.MultiAggregation([aggr.MaxAggregation(),
+                                           aggr.MinAggregation(),
+                                           aggr.MeanAggregation()])
+        self.critic_concat = torch.nn.Linear(node_types * aggr_dim * hidden_channels, hidden_channels, device=device)
+        mlp = [nn.Linear(hidden_channels, hidden_channels, device=device) for i in range(num_mlp_critic)]
+        self.critic_mlp = torch.nn.Sequential(*mlp)
+        self.critic_out = torch.nn.Linear(hidden_channels, 1, device=device)
 
     def forward(self, inputs):
         self.convs.to(device)
-        emb_part = self.embedding_parts(inputs['part'].mass)
-        emb_state = self.embedding_state(
-            (inputs['part'].part_state[:, 0] + 2 * inputs['part'].part_state[:, 1]).to(torch.int64))
-        reppart = torch.cat([emb_part, emb_state], dim=-1)
+        emb_geom = self.embedding_part_geom(inputs['part'].mass)
+        emb_state = self.embedding_part_state(inputs['part'].x)
 
-        rep = self.convs({'part': reppart,
-                          'torque': inputs['torque'].x,
-                          'force': inputs['force'].x},
-                         inputs.edge_index_dict)
+        h = self.convs({'part': torch.cat([emb_geom, emb_state], dim=-1),
+                        'torque': inputs['torque'].x,
+                        'force': inputs['force'].x},
+                       inputs.edge_index_dict)
 
-        # concat all output
-        repA = self.convActor(rep, inputs.edge_index_dict)
-        # rep_actions = repA['part']
-        rep_actions = self.ln(repA['part'])
-        rep_actions = self.out_a(rep_actions)
+        # actor
+        actor_h = self.actor_convs(h, inputs.edge_index_dict)
+        actor_out = self.actor_layernrm(actor_h['part'])
+        actor_out = self.actor_out(actor_out)
         actions = torch.zeros((inputs['part'].batch.max() + 1, 2, self.n_part), device=device, dtype=floatType)
-        actions[inputs['part'].batch, :, inputs['part'].part_id] = torch_geometric.utils.softmax(rep_actions,
+        actions[inputs['part'].batch, :, inputs['part'].part_id] = torch_geometric.utils.softmax(actor_out,
                                                                                                  ptr=inputs['part'].ptr)
         actions = actions.flatten(start_dim=1)
 
-        rep = torch.cat([self.aggr(rep['part'], ptr=inputs.ptr_dict['part']),
-                         self.aggr(rep['torque'], ptr=inputs.ptr_dict['torque']),
-                         self.aggr(rep['force'], ptr=inputs.ptr_dict['force']),
-                         ], axis=1)
-
-        # batchnorm work well in general, but as the batches are not shuffled it can cause problems
-        # rep  = self.bn(rep)
-        repV = F.gelu(self.innet(rep))
-        for layer in self.full_net:
-            repV = F.gelu(layer(repV))
-        V = F.tanh(self.outnet(repV))
-        return actions, V
+        # critic
+        critic_h_cat = torch.cat([self.aggr(h['part'], ptr=inputs.ptr_dict['part']),
+                                  self.aggr(h['torque'], ptr=inputs.ptr_dict['torque']),
+                                  self.aggr(h['force'], ptr=inputs.ptr_dict['force'])], axis=1)
+        critic_h = F.gelu(self.critic_concat(critic_h_cat))
+        critic_h = self.critic_mlp(critic_h)
+        v = F.tanh(self.critic_out(critic_h))
+        return actions, v
 
 
 class ActorCriticGATG(nn.Module):
@@ -115,27 +115,21 @@ class ActorCriticGATG(nn.Module):
                                           centroids=policy_config.centroids)
 
         self.mask_prob = 1E-9
-        self.deterministic = False
 
     def act(self, state, mask):
         action_probs, state_val = self.actor(state)
         action_probs = mask * action_probs + mask * self.mask_prob
         dist = Categorical(action_probs)
-        if not self.deterministic:
-            action = dist.sample()
-        else:
-            action = torch.argmax(dist.probs, dim=-1).reshape(-1)
+        action = dist.sample()
         action_logprob = dist.log_prob(action)
         return action.detach(), action_logprob.detach(), state_val.detach()
 
     def evaluate(self, state, action, mask):
         action_probs, state_values = self.actor(state)
-
         action_probs = mask * action_probs + mask * self.mask_prob
         dist = Categorical(action_probs)
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
-
         return action_logprobs, state_values, dist_entropy
 
 
@@ -144,10 +138,12 @@ if __name__ == "__main__":
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
     from learn2assemble.graph import GFTFGraphConstructor
     import numpy as np
+    import time
 
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
     settings = {
-        "contact_settings": {
+        "contact_settings":
+        {
             "shrink_ratio": 0.0,
         },
         "rbe": {
@@ -174,24 +170,20 @@ if __name__ == "__main__":
 
     contacts = compute_assembly_contacts(parts)
     graph_constructor = GFTFGraphConstructor(parts, contacts)
+    torch.manual_seed(100)
 
     graphs = []
-    nbatch = 3
-    part_states = torch.randint(low=0, high=3, size=(nbatch, len(parts)), dtype=torch.int32, device=device)
+    nbatch = 1024
+    part_states = torch.randint(low=0, high=3, size=(nbatch, len(parts)), dtype=torch.int32, device="cpu")
+    start = time.perf_counter()
     graphs = graph_constructor.graphs(part_states)
-    batch_graph = torch_geometric.data.Batch.from_data_list(graphs)
-    torch.manual_seed(100)
+    print("build graph:\t", time.perf_counter() - start)
+    start = time.perf_counter()
+    batch_graph = torch_geometric.data.Batch.from_data_list(graphs).to(device)
+    print("batch graph:\t", time.perf_counter() - start)
+
+    start = time.perf_counter()
     A2C = ActorCriticGATG(len(parts), settings).to(device)
-    print(batch_graph)
     mask = torch.ones((nbatch, len(parts) * 2), device=device, dtype=bool)
-    mask[0, 15] = False
-    mask[1, 75] = False
-    mask[2, 0] = False
     a, alp, v = A2C.act(batch_graph, mask)
-    print(a)
-    print(alp)
-    print(v)
-    alp, v, ent = A2C.evaluate(batch_graph, a, mask)
-    print(alp)
-    print(v)
-    print(ent)
+    print("inference graph:\t", time.perf_counter() - start)

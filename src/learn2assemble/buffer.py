@@ -31,7 +31,7 @@ class RolloutDatasetGNN(torch_geometric.data.Dataset):
 
     def add_states(self, states):
         self.states = states
-        self.batch_graphs = torch_geometric.data.Batch.from_data_list(self.states)
+        #self.batch_graphs = torch_geometric.data.Batch.from_data_list(self.states)
         self.nsamples = len(states)
 
     def batch_data_from_to(self,idx_start, idx_end):

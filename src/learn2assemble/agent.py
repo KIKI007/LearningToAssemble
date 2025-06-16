@@ -78,11 +78,10 @@ class PPO:
                       env_inds: np.ndarray):
         # build graphs
         masks = torch.tensor(masks, dtype=floatType, device=device)
-        part_states = torch.tensor(part_states, dtype=intType, device=device)
         graphs = self.graph_constructor.graphs(part_states)
 
         # to batch graphs
-        batch_graph = torch_geometric.data.Batch.from_data_list(graphs)
+        batch_graph = torch_geometric.data.Batch.from_data_list(graphs).to(device)
 
         # inference
         self.policy_old.eval()

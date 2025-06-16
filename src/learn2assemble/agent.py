@@ -14,7 +14,7 @@ from time import perf_counter
 from learn2assemble import set_default
 from learn2assemble.graph import GFTFGraphConstructor
 from learn2assemble.policy import ActorCriticGATG
-from learn2assemble.buffer import RolloutBufferGNN
+from learn2assemble.buffer import RolloutBuffer
 from learn2assemble.disassemly_env import DisassemblyEnv
 from learn2assemble.curriculum import forward_curriculum
 
@@ -37,9 +37,12 @@ class PPO:
                                      "max_entropy_weight": 0.01,
 
                                      "lr_milestones": [100, 300],
-                                     "num_step_anneal": 500,
                                      "lr_actor": 2e-3,
                                      "betas_actor": [0.95, 0.999],
+
+                                     "per_alpha": 0.8,
+                                     "per_beta": 0.1,
+                                     "per_num_anneal": 500,
                                  })
 
         ppo_config = SimpleNamespace(**ppo_config)
@@ -52,13 +55,15 @@ class PPO:
 
         self.num_failed = torch.zeros(n_curriculums, dtype=intType, device=device)
         self.num_success = torch.zeros(n_curriculums, dtype=intType, device=device)
-        self.buffer = RolloutBufferGNN(n_robot=env.n_robot,
-                                       num_curriculums=n_curriculums,
-                                       gamma=ppo_config.gamma,
-                                       base_entropy_weight=ppo_config.base_entropy_weight,
-                                       entropy_weight_increase=ppo_config.entropy_weight_increase,
-                                       max_entropy_weight=ppo_config.max_entropy_weight,
-                                       num_step_anneal=ppo_config.num_step_anneal)
+        self.buffer = RolloutBuffer(n_robot=env.n_robot,
+                                    num_curriculums=n_curriculums,
+                                    gamma=ppo_config.gamma,
+                                    base_entropy_weight=ppo_config.base_entropy_weight,
+                                    entropy_weight_increase=ppo_config.entropy_weight_increase,
+                                    max_entropy_weight=ppo_config.max_entropy_weight,
+                                    per_alpha=ppo_config.per_alpha,
+                                    per_beta=ppo_config.per_beta,
+                                    per_num_anneal=ppo_config.per_num_anneal)
 
         self.policy = ActorCriticGATG(env.n_part, settings).to(device)
         self.optimizer_params = {'params': self.policy.actor.parameters(),
@@ -96,36 +101,10 @@ class PPO:
 
         return action.cpu().numpy()
 
-    def compute_policy(self,
-                       part_states: np.ndarray,
-                       masks: np.ndarray):
-        # build graphs
-        masks = torch.tensor(masks, dtype=floatType, device=device)
-        part_states = torch.tensor(part_states, dtype=intType, device=device)
-        graphs = self.graph_constructor.graphs(part_states)
-
-        # to batch graphs
-        batch_graph = torch_geometric.data.Batch.from_data_list(graphs)
-
-        # inference
-        self.policy_old.eval()
-        with torch.no_grad():
-            action_probs, state_val = self.policy_old.actor(batch_graph)
-            action_probs = masks * action_probs + masks * self.policy_old.mask_prob
-        action_probs /= action_probs.sum(1, keepdim=True)
-        dist = Categorical(action_probs)
-        action = dist.sample()
-        return action, action_probs, state_val
-
     def update_policy(self, batch_size=None, update_iter=5):
 
         # extract training dataset from buffer
-        self.buffer.set_policy(self.policy_old)
         dataset = self.buffer.build_dataset(batch_size=batch_size)
-
-        if self.buffer.num_step_anneal > 0:
-            self.buffer.num_step_anneal -= 1
-            self.buffer.beta += self.buffer.slope
 
         # record
         loss = []
@@ -204,10 +183,7 @@ class PPO:
         loss = (surrogate_loss * weights).mean() + 0.5 * (value_loss * weights).mean() - (
                 entropy_weights * dist_entropy * weights).mean()
 
-        self.buffer.curriculum_cumvalloss = self.buffer.curriculum_cumvalloss.scatter_reduce(0, curriculum_id,
-                                                                                             value_loss.detach(),
-                                                                                             reduce='sum',
-                                                                                             include_self=not first)
+        self.buffer.curriculum_visited[curriculum_id] = True
 
         self.buffer.curriculum_cumsurloss = self.buffer.curriculum_cumsurloss.scatter_reduce(0, curriculum_id,
                                                                                              torch.abs(
@@ -222,19 +198,8 @@ class PPO:
 
         return loss_all, scale * surrogate_loss.mean().item(), scale * value_loss.mean().item(), entropy_mean
 
-    def save(self, checkpoint_path, print_info=None):
-        if print_info is None:
-            print_info = f"Untested policy; Accuracy on the prioritized replay buffer: {self.saved_accuracy}"
-        d = {#'config': wandb.config.as_dict(),
-             'state_dict': self.policy_old.state_dict(),
-             'print_info': print_info}
+    def save(self, checkpoint_path, settings):
+        d = {'settings': settings,
+             'state_dict': self.policy_old.state_dict()}
         with open(checkpoint_path, 'wb') as handle:
             pickle.dump(d, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-    def load(self, checkpoint_path):
-        warn(
-            "Legacy loader for the policy. If the file name ends with .pol, use init_ppo with the path to the file to load it")
-        self.policy_old.load_state_dict(
-            torch.load(checkpoint_path, map_location=lambda storage, loc: storage, weights_only=False))
-        self.policy.load_state_dict(
-            torch.load(checkpoint_path, map_location=lambda storage, loc: storage, weights_only=False))

@@ -5,7 +5,7 @@ import learn2assemble.simulator
 from time import perf_counter
 from trimesh import Trimesh
 from learn2assemble import set_default
-from learn2assemble.buffer import RolloutBufferGNN
+from learn2assemble.buffer import RolloutBuffer
 
 
 class Timer:
@@ -41,8 +41,8 @@ class DisassemblyEnv:
                                        "sim_buffer_size": 64,
                                        "num_rollouts": 64,
                                        "seed": 0,
-                                       "name": "example",
                                        "verbose": False,
+                                       "alpha": 0.8,
                                    })
 
         env_settings = SimpleNamespace(**env_settings)
@@ -51,6 +51,7 @@ class DisassemblyEnv:
         self.parts = parts
         self.contacts = contacts
         self.verbose = env_settings.verbose
+        self.alpha = env_settings.alpha
 
         self.n_robot = env_settings.n_robot
         self.n_part = len(parts)
@@ -100,12 +101,13 @@ class DisassemblyEnv:
     def simulate_buffer(self, simulate_remain=False):
 
         while len(self.sim_buffer):
+            # check whether the buffer is filled
             num_to_sim = min(self.sim_buffer_size, len(self.sim_buffer))
             if num_to_sim < self.sim_buffer_size and not simulate_remain:
                 break
-            part_states = np.vstack(self.sim_buffer[:num_to_sim])
 
             self.timer.start("simulation")
+            part_states = np.vstack(self.sim_buffer[:num_to_sim])
             _, stable_flag = learn2assemble.simulator.simulate(self.parts, self.contacts, part_states, self.settings)
             elapse, _ = self.timer.stop("simulation", True)
             if self.verbose:
@@ -138,17 +140,19 @@ class DisassemblyEnv:
             self.stability_history[state_encode] = stable_flag[ind]
         self.timer.stop("history", True)
 
-    def get_stability_history(self, part_states, actions):
+    def get_history(self, part_state):
+        state_encode = tuple(part_state.tolist())
+        if state_encode in self.stability_history:
+            return self.stability_history[state_encode]
+        return 0
+
+    def simulate(self, part_states, actions):
 
         self.timer.start("history")
         for ind, part_state in enumerate(part_states):
             state_encode = tuple(part_state.tolist())
-            if state_encode not in self.stability_history:
-                if actions[ind] < self.n_part:
-                    self.stability_history[state_encode] = 1
-                else:
-                    self.stability_history[state_encode] = 0
-                self.sim_buffer.append(part_state)
+            if actions[ind] >= self.n_part and state_encode not in self.stability_history:
+                self.sim_buffer.append(part_state) # add state into simulation buffer
         self.timer.stop("history", True)
 
         self.simulate_buffer()
@@ -156,10 +160,11 @@ class DisassemblyEnv:
         self.timer.start("history")
         results = []
         for ind, part_state in enumerate(part_states):
-            state_encode = tuple(part_state.tolist())
-            results.append(self.stability_history[state_encode])
+            if actions[ind] < self.n_part:
+                results.append(1) # stability = 1 for held actions
+            else:
+                results.append(self.get_history(part_state))
         self.timer.stop("history", True)
-
         return np.array(results, dtype=np.int32)
 
     def action_masks(self, part_states: np.ndarray):
@@ -217,7 +222,7 @@ class DisassemblyEnv:
         success_flag = np.logical_and(self.check_terminate(new_part_states), valid_action_flag)
         rewards[success_flag] = 1
 
-        stability = self.get_stability_history(new_part_states, actions)
+        stability = self.simulate(new_part_states, actions)
         rewards = np.where(stability == -1, -1, rewards)
 
         return new_part_states, rewards, stability
@@ -259,13 +264,15 @@ if __name__ == "__main__":
     env = DisassemblyEnv(parts, contacts, settings=settings)
 
     part_states, env_inds = env.reset()
-    buffer = RolloutBufferGNN(n_robot=env.n_robot,
+    buffer = RolloutBuffer(n_robot=env.n_robot,
                               num_curriculums=1,
                               gamma=0,
                               base_entropy_weight=0,
                               entropy_weight_increase=0,
                               max_entropy_weight=0,
-                              num_step_anneal=1)
+                              per_alpha=0.8,
+                              per_beta=0.1,
+                              per_num_anneal=1)
     buffer.clear(env.num_rollouts)
     n_step = 0
     while True:

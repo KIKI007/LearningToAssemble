@@ -56,7 +56,8 @@ settings = {
         "save_delta_accuracy": 0.01,
         "print_epochs": 1,
         "policy_update_batch_size": 2048,
-        "K_epochs": 5
+        "K_epochs": 5,
+        "output_name": "tetris-1"
     }
 }
 

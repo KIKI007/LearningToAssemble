@@ -8,7 +8,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
 
-class RolloutDatasetGNN(torch_geometric.data.Dataset):
+class RolloutDataset(torch_geometric.data.Dataset):
     def __init__(self, transform=None, pre_transform=None, batch_size=100):
         super().__init__(None, transform, pre_transform)
         self._indices = None
@@ -46,7 +46,7 @@ class RolloutDatasetGNN(torch_geometric.data.Dataset):
             self.entropy_weights[idx_start:idx_end].to(device,non_blocking=True),
             self.curriculum_id[idx_start:idx_end].to(device,non_blocking=True))
 
-class RolloutBufferGNN:
+class RolloutBuffer:
 
     def __init__(self,
                  n_robot,
@@ -55,32 +55,33 @@ class RolloutBufferGNN:
                  base_entropy_weight,
                  entropy_weight_increase,
                  max_entropy_weight,
-                 max_loss=100,
-                 num_step_anneal = 100):
+                 per_alpha,
+                 per_beta,
+                 per_num_anneal):
 
         self.n_robot = n_robot
         self.gamma = gamma
         self.history = {}
         self.clear()
-        self.max_loss = max_loss
-
-        self.curriculum_cumvalloss = max_loss*torch.ones((num_curriculums), dtype=floatType, device=device)
-        self.curriculum_cumsurloss = max_loss*torch.ones((num_curriculums), dtype=floatType, device=device)
+        self.curriculum_visited = torch.zeros(num_curriculums, device = device, dtype = torch.bool)
+        self.curriculum_cumsurloss = torch.zeros(num_curriculums, device = device, dtype=floatType)
         self.curriculum_rank = torch.arange(num_curriculums, dtype=intType, device=device)
 
         self.entropy_weights = base_entropy_weight*torch.ones((num_curriculums), dtype=floatType, device=device)
-        self.alpha = 0.8
-        self.beta = 0.1
-        self.num_step_anneal = num_step_anneal
-        self.beta0 = 1
-        self.slope = (self.beta0-self.beta)/num_step_anneal
+        self.per_alpha = per_alpha
+        self.per_beta = per_beta
+
+        self.num_step_anneal = per_num_anneal
+        self.per_beta_increase = (1.0 - self.per_beta) / per_num_anneal
 
         self.base_entropy_weight = base_entropy_weight
         self.entropy_weight_increase = entropy_weight_increase
         self.max_entropy_weight = max_entropy_weight
 
-    def set_policy(self, policy):
-        self.policy = policy
+    def update_per_beta(self):
+        if self.num_step_anneal > 0:
+            self.num_step_anneal -= 1
+            self.per_beta += self.per_beta_increase
 
     def modify_entropy(self, failed_inds, success_inds):
         increasable = self.entropy_weights[failed_inds] < self.max_entropy_weight
@@ -107,14 +108,26 @@ class RolloutBufferGNN:
         for name in names:
             self.__dict__[name][env_id] = self.__dict__[name][env_id][: step_id]
 
-    def get_valid_env_inds(self, env):
+    def sample_curriculum(self, num_rollouts):
+        visited = self.curriculum_visited
+        rank = self.curriculum_rank
+        if (visited == False).sum() > num_rollouts:
+            print("Exploring new environments")
+            sample_weights = torch.zeros_like(visited).to(floatType)
+            sample_weights[visited == False] = 1.0 / (visited == False).sum()
+            curriculum_inds = torch.multinomial(sample_weights, num_rollouts,False)
+        else:
+            inds = torch.arange(1, rank.shape[0] + 1, device=device, dtype=floatType)
+            sample_weights =torch.pow(inds, -self.per_alpha) / torch.pow(inds, -self.per_alpha).sum()
+            curriculum_inds = torch.multinomial(sample_weights[rank], num_rollouts,True)
+        return curriculum_inds.cpu()
 
+    def get_valid_env_inds(self, env):
         if env.updated_simulation:
             for env_id in range(self.num_envs):
                 for step_id in range(len(self.next_stability[env_id])):
                     if self.next_stability[env_id][step_id] == 0:
-                        state_encode = tuple(self.next_states[env_id][step_id])
-                        stability = env.stability_history[state_encode]
+                        stability = env.get_history(self.next_states[env_id][step_id])
                         self.next_stability[env_id][step_id] = stability
                         if stability == -1:
                             self.rewards_per_step[env_id][step_id] = -1
@@ -126,10 +139,14 @@ class RolloutBufferGNN:
         env_inds = []
         rewards = []
         for env_id in range(self.num_envs):
-            reward = self.rewards_per_step[env_id][-1]
-            if reward == 0:
-                env_inds.append(env_id)
-            rewards.append(reward)
+            data = self.rewards_per_step[env_id]
+            if len(data) == 0:
+                rewards.append(0)
+            else:
+                if data[-1] == 0:
+                    env_inds.append(env_id)
+                rewards.append(data[-1])
+
         return np.array(env_inds), np.array(rewards)
 
     def add(self, name, vals, env_inds):
@@ -141,7 +158,7 @@ class RolloutBufferGNN:
             self.__dict__[name][ienv].append(val)
 
     def build_dataset(self, batch_size):
-        dataset =RolloutDatasetGNN(batch_size = batch_size)
+        dataset = RolloutDataset(batch_size = batch_size)
         actions = []
         logprobs = []
         state_values = []
@@ -180,7 +197,7 @@ class RolloutBufferGNN:
             dataset.add_states(states)
             dataset.curriculum_id = torch.hstack(curriculum_id)
 
-            dataset.weights = torch.pow(1 + self.curriculum_rank[dataset.curriculum_id], self.alpha - self.beta).cpu().pin_memory()
+            dataset.weights = torch.pow(1 + self.curriculum_rank[dataset.curriculum_id], self.per_alpha - self.per_beta).cpu().pin_memory()
             dataset.weights /= dataset.weights.max()
             dataset.entropy_weights = self.entropy_weights[dataset.curriculum_id].cpu().pin_memory()
         return dataset

@@ -21,7 +21,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
 
-
 def rollout_asyn(ppo_agent, env, curriculum_inds):
     part_states = env.curriculum[curriculum_inds, :]
     ppo_agent.buffer.clear(part_states.shape[0])
@@ -37,13 +36,11 @@ def rollout_asyn(ppo_agent, env, curriculum_inds):
         next_states, rewards, next_stability = env.step(current_states, current_actions)
         part_states[env_inds, :] = next_states
 
-        # ppo_agent.buffer.add("part_states", current_states, env_inds)
         ppo_agent.buffer.add("next_states", next_states, env_inds)
         ppo_agent.buffer.add("rewards_per_step", rewards, env_inds)
         ppo_agent.buffer.add("next_stability", next_stability, env_inds)
 
         env_inds, _ = ppo_agent.buffer.get_valid_env_inds(env)
-        #print(f"n_step {n_step},\t rollout {len(env_inds)}")
         n_step = n_step + 1
 
         if env_inds.shape[0] == 0:
@@ -53,77 +50,6 @@ def rollout_asyn(ppo_agent, env, curriculum_inds):
     _, rewards = ppo_agent.buffer.get_valid_env_inds(env)
     return torch.tensor(rewards, dtype=floatType)
 
-
-def save_policy(ppo_agent, env, accuracy, training_settings):
-    delta_accuracy = training_settings.save_delta_accuracy
-    if accuracy > ppo_agent.saved_accuracy + delta_accuracy:
-        ppo_agent.saved_accuracy = accuracy
-        folder_path = f"./models/f{env.settings['env']['name']}"
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)  # Create the folder
-        model_path = f"{folder_path}/policy.pol"
-        ppo_agent.save(model_path)
-
-
-def update_stats(ppo_agent, curriculum_inds: np.ndarray, training_settings, accuracy=None):
-    # update number of fails and successes
-    rewards = ppo_agent.buffer.rewards
-    avg_reward = rewards.mean().item()
-
-    inds = curriculum_inds.to(device)
-    failed_inds = inds[(rewards < 0)]
-    success_inds = inds[(rewards > 0)]
-
-    ppo_agent.num_success[success_inds] += 1
-    ppo_agent.num_failed[success_inds] = 0
-    ppo_agent.num_failed[failed_inds] = ppo_agent.num_failed[failed_inds] + 1
-    ppo_agent.buffer.modify_entropy(failed_inds, success_inds)
-
-    # print status
-    ppo_agent.print_iter = ppo_agent.print_iter + 1
-    print_epoch = training_settings.print_epochs
-    if ppo_agent.print_iter % print_epoch == print_epoch - 1:
-        elaspe = time.perf_counter() - ppo_agent.episode_timer
-        print("Episode : {} \t\t Accuracy : {}\t\t Time : {:.2f}".format(ppo_agent.episode, round(accuracy, 2), elaspe))
-        #print("Failed Curriculum: {}".format(curriculum_inds[ppo_agent.buffer.rewards < 0]))
-
-
-def policy_check(ppo_agent, curriculum_inds):
-    num_success = torch.sum(ppo_agent.buffer.rewards > 0)
-    num_envs = curriculum_inds.shape[0]
-    # compute accuracy
-    accuracy = (num_success / num_envs)
-    return accuracy.item()
-
-
-def sample_curriculum(ppo_agent, num_envs):
-    sample_weights = None
-    if (ppo_agent.buffer.curriculum_cumvalloss == 100).sum() > num_envs:
-        print("New envs only")
-        sample_weights = torch.zeros_like(ppo_agent.buffer.curriculum_cumvalloss)
-        sample_weights[ppo_agent.buffer.curriculum_cumvalloss == 100] = 1 / (
-                ppo_agent.buffer.curriculum_cumvalloss == 100).sum()
-        curriculum_inds = torch.multinomial(sample_weights,
-                                            num_envs,
-                                            False)
-    else:
-        sample_weights = (torch.pow(
-            torch.arange(1, ppo_agent.buffer.curriculum_rank.shape[0] + 1, device=device, dtype=floatType),
-            -ppo_agent.buffer.alpha) /
-                          torch.pow(torch.arange(1, ppo_agent.buffer.curriculum_rank.shape[0] + 1, device=device,
-                                                 dtype=floatType), -ppo_agent.buffer.alpha).sum())
-        curriculum_inds = torch.multinomial(sample_weights[ppo_agent.buffer.curriculum_rank],
-                                            num_envs,
-                                            True)
-    return curriculum_inds.cpu()
-
-
-def policy_update(ppo_agent, training_settings):
-    loss, entropy = ppo_agent.update_policy(
-        batch_size=training_settings.policy_update_batch_size,
-        update_iter=training_settings.K_epochs)
-
-
 def train(parts, contacts, settings):
     training_settings = set_default(settings,
                                    "training", {
@@ -131,40 +57,66 @@ def train(parts, contacts, settings):
                                        "save_delta_accuracy": 0.01,
                                        "print_epochs": 1,
                                        "policy_update_batch_size": 2048,
-                                       "K_epochs": 5
+                                       "K_epochs": 5,
+                                       "output_name": "example"
                                    })
     training_settings = SimpleNamespace(**training_settings)
 
-    # create ppo agent
+    # policy output folder
+    folder_path = f"./models/f{training_settings.output_name}"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)  # Create the folder
+    saved_model_path = f"{folder_path}/policy.pol"
+
+    # create env
     env = DisassemblyEnv(parts, contacts, settings=settings)
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
+
+    # forward curriculum
     _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
     env.set_curriculum(curriculum)
+
+    # create ppo agent
     ppo_agent = PPO(env, settings)
 
     print(f"Start training, curriculum: {env.curriculum.shape[0]}")
-    # update variables
     ppo_agent.print_iter = 0
-
-    assert ppo_agent.buffer.curriculum_rank.shape[0] == env.curriculum.shape[0]
+    print_epoch = training_settings.print_epochs
+    ppo_agent.episode_timer = time.perf_counter()
 
     # training
-    ppo_agent.episode_timer = time.perf_counter()
     while ppo_agent.episode <= training_settings.max_train_epochs and ppo_agent.saved_accuracy < 1:
-        curriculum_inds = sample_curriculum(ppo_agent, env.num_rollouts)
+        curriculum_inds = ppo_agent.buffer.sample_curriculum(env.num_rollouts)
         ppo_agent.buffer.curriculum_inds = curriculum_inds
         ppo_agent.buffer.rewards = rollout_asyn(ppo_agent, env, curriculum_inds)
 
-        # compute accuracy
-        accuracy = policy_check(ppo_agent, curriculum_inds)
+        # update entropy weights
+        rewards = ppo_agent.buffer.rewards
+        inds = curriculum_inds.to(device)
+        failed_inds = inds[(rewards < 0)]
+        success_inds = inds[(rewards > 0)]
+        ppo_agent.num_success[success_inds] += 1
+        ppo_agent.num_failed[success_inds] = 0
+        ppo_agent.num_failed[failed_inds] = ppo_agent.num_failed[failed_inds] + 1
+        ppo_agent.buffer.modify_entropy(failed_inds, success_inds)
 
-        # update number of fails
-        update_stats(ppo_agent, curriculum_inds, training_settings, accuracy)
-        ppo_agent.episode_timer = time.perf_counter()
+        # print status
+        ppo_agent.print_iter = ppo_agent.print_iter + 1
+        if ppo_agent.print_iter % print_epoch == print_epoch - 1:
+            elaspe = time.perf_counter() - ppo_agent.episode_timer
+            accuracy = (torch.sum(rewards > 0) / env.num_rollouts).item()
+            print("Episode : {} \t\t Accuracy : {:.2f}\t\t Time : {:.2f}".format(ppo_agent.episode,
+                                                                             accuracy,
+                                                                             elaspe))
+            ppo_agent.episode_timer = time.perf_counter()
 
-        # save model
-        save_policy(ppo_agent, env, accuracy, training_settings)
+        # save policy
+        delta_accuracy = training_settings.save_delta_accuracy
+        if accuracy > ppo_agent.saved_accuracy + delta_accuracy:
+            ppo_agent.saved_accuracy = accuracy
+            ppo_agent.save(saved_model_path, settings)
 
         # policy update
-        policy_update(ppo_agent, training_settings)
+        loss, entropy = ppo_agent.update_policy(batch_size=training_settings.policy_update_batch_size,
+                                                update_iter=training_settings.K_epochs)
         ppo_agent.episode = ppo_agent.episode + 1

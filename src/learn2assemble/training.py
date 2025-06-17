@@ -35,7 +35,6 @@ def training_rollout(ppo_agent: PPO,
 
     n_step = 0
     while True:
-        queue.put(part_states)
 
         current_states = part_states[env_inds, :]
         masks = env.action_masks(current_states)

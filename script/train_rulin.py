@@ -15,7 +15,7 @@ if __name__ == "__main__":
             "n_robot": 2,
             "boundary_part_ids": [0],
             "sim_buffer_size": 512,
-            "num_rollouts": 256,
+            "num_rollouts": 1024,
             "verbose": False,
         },
         "rbe": {
@@ -48,7 +48,7 @@ if __name__ == "__main__":
             "entropy_weight_increase": 0.001,
             "max_entropy_weight": 0.01,
 
-            "lr_milestones": [100, 300],
+            "lr_milestones": [1000, 3000],
             "num_step_anneal": 500,
             "lr_actor": 2e-3,
             "betas_actor": [0.95, 0.999],
@@ -67,9 +67,9 @@ if __name__ == "__main__":
     queue = Queue()
     contacts = compute_assembly_contacts(parts, settings)
 
-    p1 = Process(target=train, args=(parts, contacts, settings, queue))
-    p2 = Process(target=render_batch_simulation, args=(parts, settings["env"]["boundary_part_ids"], queue))
-    p2.start()
+    p1 = Process(target=train, args=(parts, contacts, settings, None))
+    #p2 = Process(target=render_batch_simulation, args=(parts, settings["env"]["boundary_part_ids"], queue))
+    #p2.start()
     p1.start()
     p1.join()
-    p2.join()
+    #p2.join()

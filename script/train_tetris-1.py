@@ -67,10 +67,10 @@ if __name__ == "__main__":
 
     queue = Queue()
     contacts = compute_assembly_contacts(parts, settings)
-
-    p1 = Process(target=train, args=(parts, contacts, settings, None))
+    train(parts, contacts, settings, None)
+    #p1 = Process(target=train, args=(parts, contacts, settings, None))
     #p2 = Process(target=render_batch_simulation, args=(parts, settings["env"]["boundary_part_ids"], queue))
     # p2.start()
-    p1.start()
-    p1.join()
+    #p1.start()
+    #p1.join()
     # p2.join()

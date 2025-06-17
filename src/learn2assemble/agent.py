@@ -21,7 +21,7 @@ from learn2assemble.curriculum import forward_curriculum
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
-
+from learn2assemble.disassemly_env import Timer
 
 class PPO:
     def __init__(self, env, settings):
@@ -52,6 +52,7 @@ class PPO:
         self.saved_accuracy = 0
         self.episode = 0
         self.eps_clip = ppo_config.eps_clip
+        self.timer = Timer()
 
         self.num_failed = torch.zeros(n_curriculums, dtype=intType, device=device)
         self.num_success = torch.zeros(n_curriculums, dtype=intType, device=device)
@@ -66,10 +67,12 @@ class PPO:
                                     per_num_anneal=ppo_config.per_num_anneal)
 
         self.policy = ActorCriticGATG(env.n_part, settings).to(device)
-        self.optimizer_params = {'params': self.policy.actor.parameters(),
-                                 'lr': ppo_config.lr_actor,
-                                 'weight_decay': 0,
-                                 'betas': ppo_config.betas_actor}
+        self.optimize_params = {
+            'params': self.policy.actor.parameters(),
+            'lr': ppo_config.lr_actor,
+            'weight_decay': 0,
+            'betas': ppo_config.betas_actor
+        }
         self.optimizer = torch.optim.Adam([self.optimizer_params])
         self.MseLoss = nn.MSELoss(reduction='none')
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=ppo_config.lr_milestones)
@@ -110,28 +113,24 @@ class PPO:
         loss = []
         entropy = []
 
-        # dl = torch_geometric.utils.data.DataLoader(dataset,pin_memory=True)
         self.policy.train(True)
-
-        # reset optimizer
-        self.scheduler.step()
-        self.optimizer_params['lr'], *_ = self.scheduler.get_last_lr()
         self.optimizer = torch.optim.Adam([self.optimizer_params])
 
         for epoch_index in range(update_iter):
-            self.sur_loss = 0
-            self.val_loss = 0
+            surgate_loss = 0
+            value_loss = 0
             self.optimizer.zero_grad()
             for i, batch in enumerate(dataset):
                 if len(batch) > 0:
                     loss_all, sur_loss, val_loss, entropy_batch = self.train_one_epoch(*batch,
                                                                                        nsampletot=dataset.nsamples,
                                                                                        first=(i == 0))
-                    self.sur_loss += sur_loss
-                    self.val_loss += val_loss
+                    surgate_loss += sur_loss
+                    value_loss += val_loss
                     loss.append(loss_all)
                     entropy.append(entropy_batch)
             self.optimizer.step()
+
         sampled, n = torch.unique(dataset.curriculum_id.to(device), return_counts=True)
         self.buffer.curriculum_cumsurloss[sampled] /= (n * update_iter)
         self.buffer.curriculum_rank = torch.argsort(torch.argsort(self.buffer.curriculum_cumsurloss, descending=True))
@@ -139,13 +138,11 @@ class PPO:
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-        # clear buffer
+        # reset optimizer
         self.buffer.clear()
+        self.scheduler.step()
+        self.optimizer_params['lr'], *_ = self.scheduler.get_last_lr()
 
-        # avoid empty list
-        if len(entropy) == 0:
-            entropy = [0]
-            loss = [0]
         return np.sum(loss), np.mean(entropy)
 
     def train_one_epoch(self,

@@ -16,12 +16,17 @@ from learn2assemble.agent import PPO
 from trimesh import Trimesh
 import numpy as np
 import time
+from multiprocessing import Queue
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
 
-def training_rollout(ppo_agent, env, curriculum_inds):
+def training_rollout(ppo_agent: PPO,
+                     env: DisassemblyEnv,
+                     curriculum_inds: np.ndarray,
+                     training_settings,
+                     queue: Queue):
     part_states = env.curriculum[curriculum_inds, :]
     ppo_agent.buffer.clear(part_states.shape[0])
     n_env = part_states.shape[0]
@@ -30,6 +35,8 @@ def training_rollout(ppo_agent, env, curriculum_inds):
 
     n_step = 0
     while True:
+        queue.put(part_states)
+
         current_states = part_states[env_inds, :]
         masks = env.action_masks(current_states)
         current_actions = ppo_agent.select_action(current_states, masks, env_inds)
@@ -41,6 +48,9 @@ def training_rollout(ppo_agent, env, curriculum_inds):
         ppo_agent.buffer.add("next_stability", next_stability, env_inds)
 
         env_inds, _ = ppo_agent.buffer.get_valid_env_inds(env)
+        if queue is not None:
+            data = ppo_agent.buffer.get_current_states_for_rendering(training_settings.num_render_debug)
+            queue.put(data)
         n_step = n_step + 1
 
         if env_inds.shape[0] == 0:
@@ -48,9 +58,15 @@ def training_rollout(ppo_agent, env, curriculum_inds):
 
     env.simulate_buffer(simulate_remain=True)
     _, rewards = ppo_agent.buffer.get_valid_env_inds(env)
+    if queue is not None:
+        data = ppo_agent.buffer.get_current_states_for_rendering(training_settings.num_render_debug)
+        queue.put(data)
     return torch.tensor(rewards, dtype=floatType)
 
-def train(parts, contacts, settings):
+def train(parts: list[Trimesh],
+          contacts: dict,
+          settings:dict,
+          queue: Queue = None):
     training_settings = set_default(settings,
                                    "training", {
                                        "max_train_epochs": 50000,
@@ -58,8 +74,9 @@ def train(parts, contacts, settings):
                                        "print_epochs": 1,
                                        "policy_update_batch_size": 2048,
                                        "K_epochs": 5,
-                                       "output_name": "example"
-                                   })
+                                       "output_name": "example",
+                                        "num_render_debug": 8 * 8,
+    })
     training_settings = SimpleNamespace(**training_settings)
 
     # policy output folder
@@ -88,7 +105,7 @@ def train(parts, contacts, settings):
     while ppo_agent.episode <= training_settings.max_train_epochs and ppo_agent.saved_accuracy < 1:
         curriculum_inds = ppo_agent.buffer.sample_curriculum(env.num_rollouts)
         ppo_agent.buffer.curriculum_inds = curriculum_inds
-        ppo_agent.buffer.rewards = training_rollout(ppo_agent, env, curriculum_inds)
+        ppo_agent.buffer.rewards = training_rollout(ppo_agent, env, curriculum_inds, training_settings, queue)
 
         # update entropy weights
         rewards = ppo_agent.buffer.rewards

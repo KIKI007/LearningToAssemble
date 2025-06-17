@@ -3,9 +3,12 @@ from types import SimpleNamespace
 import numpy as np
 import learn2assemble.simulator
 from time import perf_counter
+
 from trimesh import Trimesh
 from learn2assemble import set_default
 from learn2assemble.buffer import RolloutBuffer
+from multiprocessing import Process, Queue
+
 
 
 class Timer:
@@ -152,7 +155,7 @@ class DisassemblyEnv:
         for ind, part_state in enumerate(part_states):
             state_encode = tuple(part_state.tolist())
             if actions[ind] >= self.n_part and state_encode not in self.stability_history:
-                self.sim_buffer.append(part_state) # add state into simulation buffer
+                self.sim_buffer.append(part_state)  # add state into simulation buffer
         self.timer.stop("history", True)
 
         self.simulate_buffer()
@@ -161,7 +164,7 @@ class DisassemblyEnv:
         results = []
         for ind, part_state in enumerate(part_states):
             if actions[ind] < self.n_part:
-                results.append(1) # stability = 1 for held actions
+                results.append(1)  # stability = 1 for held actions
             else:
                 results.append(self.get_history(part_state))
         self.timer.stop("history", True)
@@ -227,14 +230,62 @@ class DisassemblyEnv:
 
         return new_part_states, rewards, stability
 
+def env_debug(parts:list[Trimesh], settings:dict, queue: Queue):
+    from learn2assemble.assembly import compute_assembly_contacts
+    contacts = compute_assembly_contacts(parts, settings)
+    env = DisassemblyEnv(parts, contacts, settings=settings)
+
+    part_states, env_inds = env.reset()
+    buffer = RolloutBuffer(n_robot=env.n_robot,
+                           num_curriculums=1,
+                           gamma=0,
+                           base_entropy_weight=0,
+                           entropy_weight_increase=0,
+                           max_entropy_weight=0,
+                           per_alpha=0.8,
+                           per_beta=0.1,
+                           per_num_anneal=1)
+    buffer.clear(env.num_rollouts)
+    n_step = 0
+    while True:
+        current_part_states = part_states[env_inds, :]
+        current_actions = env.sample_actions(current_part_states)
+        next_states, rewards, next_stability = env.step(current_part_states, current_actions)
+        part_states[env_inds, :] = next_states
+
+        buffer.add("part_states", current_part_states, env_inds)
+        buffer.add("next_states", next_states, env_inds)
+        buffer.add("rewards_per_step", rewards, env_inds)
+        buffer.add("next_stability", next_stability, env_inds)
+
+        if queue is not None:
+            data = buffer.get_current_states_for_rendering(env.num_rollouts)
+            queue.put(data)
+
+        env_inds, _ = buffer.get_valid_env_inds(env)
+
+        print(f"n_step {n_step},\t rollout {len(env_inds)}")
+
+        n_step += 1
+        if env_inds.shape[0] == 0:
+            break
+
+    env.simulate_buffer(True)
+    _, rewards = buffer.get_valid_env_inds(env)
+
+    if queue is not None:
+        data = buffer.get_current_states_for_rendering(env.num_rollouts)
+        queue.put(data)
+
 
 if __name__ == "__main__":
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
-    from learn2assemble.render import *
-    from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import torch
-
+    from learn2assemble.render import render_batch_simulation
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR
+    from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
+
     settings = {
         "contact_settings": {
             "shrink_ratio": 0.0,
@@ -242,8 +293,8 @@ if __name__ == "__main__":
         "env": {
             "n_robot": 2,
             "boundary_part_ids": [0],
-            "sim_buffer_size": 1024*16,
-            "num_rollouts": 100000,
+            "sim_buffer_size": 128,
+            "num_rollouts": 4*4,
             "verbose": True,
         },
         "rbe": {
@@ -260,71 +311,10 @@ if __name__ == "__main__":
         }
     }
 
-    contacts = compute_assembly_contacts(parts, settings)
-    env = DisassemblyEnv(parts, contacts, settings=settings)
-
-    part_states, env_inds = env.reset()
-    buffer = RolloutBuffer(n_robot=env.n_robot,
-                              num_curriculums=1,
-                              gamma=0,
-                              base_entropy_weight=0,
-                              entropy_weight_increase=0,
-                              max_entropy_weight=0,
-                              per_alpha=0.8,
-                              per_beta=0.1,
-                              per_num_anneal=1)
-    buffer.clear(env.num_rollouts)
-    n_step = 0
-    while True:
-        current_part_states = part_states[env_inds, :]
-        current_actions = env.sample_actions(current_part_states)
-        next_states, rewards, next_stability = env.step(current_part_states, current_actions)
-        part_states[env_inds, :] = next_states
-
-        buffer.add("part_states", current_part_states, env_inds)
-        buffer.add("next_states", next_states, env_inds)
-        buffer.add("rewards_per_step", rewards, env_inds)
-        buffer.add("next_stability", next_stability, env_inds)
-
-        env_inds, _ = buffer.get_valid_env_inds(env)
-
-        print(f"n_step {n_step},\t rollout {len(env_inds)}")
-
-        n_step += 1
-        if env_inds.shape[0] == 0:
-            break
-
-    env.simulate_buffer(True)
-    _, rewards = buffer.get_valid_env_inds(env)
-
-    # import polyscope as ps
-    # env_id = 0
-    # step_id = 0
-    # init_polyscope()
-    #
-    # solutions = []
-    # max_steps = 0
-    #
-    # for env_ind in range(env.num_rollouts):
-    #     if rewards[env_ind] > 0:
-    #         list = buffer.next_states[env_ind].copy()
-    #         list.reverse()
-    #         solutions.append(list)
-    #
-    # def interact():
-    #     global step_id, env_id
-    #     render = False
-    #     changed, env_id = psim.SliderInt("env", v=env_id, v_min=0, v_max=len(solutions) - 1)
-    #     if changed:
-    #         step_id = 0
-    #     render = render or changed
-    #     changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=len(solutions[env_id]) - 1)
-    #     render = render or changed
-    #     if render:
-    #         ps.remove_all_structures()
-    #         ps.remove_all_groups()
-    #         draw_assembly(parts, solutions[env_id][step_id])
-    #
-    # draw_assembly(parts, env.curriculum[0])
-    # ps.set_user_callback(interact)
-    # ps.show()
+    queue = Queue()
+    p1 = Process(target=env_debug, args=(parts, settings, queue))
+    p2 = Process(target=render_batch_simulation, args=(parts, settings["env"]["boundary_part_ids"], queue))
+    p2.start()
+    p1.start()
+    p1.join()
+    p2.join()

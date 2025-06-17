@@ -122,6 +122,20 @@ class RolloutBuffer:
             curriculum_inds = torch.multinomial(sample_weights[rank], num_rollouts,True)
         return curriculum_inds.cpu()
 
+    def get_current_states_for_rendering(self, num_render):
+        batch_part_states = []
+        batch_stability = []
+        num_render = min(num_render, self.num_envs)
+        for env_id in range(num_render):
+            batch_part_states.append(self.next_states[env_id][-1])
+            batch_stability.append(self.next_stability[env_id][-1])
+        batch_part_states = np.vstack(batch_part_states)
+        batch_stability = np.array(batch_stability)
+        return {
+            "type": "render",
+            "data" : [batch_part_states, batch_stability]
+        }
+
     def get_valid_env_inds(self, env):
         if env.updated_simulation:
             for env_id in range(self.num_envs):

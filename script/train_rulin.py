@@ -57,7 +57,7 @@ if __name__ == "__main__":
             "max_train_epochs": 50000,
             "save_delta_accuracy": 0.01,
             "print_epochs": 1,
-            "policy_update_batch_size": 2048,
+            "policy_update_batch_size": 1024,
             "K_epochs": 5,
             "output_name": "rulin",
             "num_render_debug": 4 * 4,

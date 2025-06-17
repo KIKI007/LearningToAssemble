@@ -13,7 +13,7 @@ class RolloutDataset(torch_geometric.data.Dataset):
         super().__init__(None, transform, pre_transform)
         self._indices = None
         self.batch_size = batch_size
-        self.nsamples = 0
+        self.nstates = 0
         self.nstreams = 5
         self.tos = Stream(device)
 
@@ -31,8 +31,7 @@ class RolloutDataset(torch_geometric.data.Dataset):
 
     def add_states(self, states):
         self.states = states
-        #self.batch_graphs = torch_geometric.data.Batch.from_data_list(self.states)
-        self.nsamples = len(states)
+        self.nstates = len(states)
 
     def batch_data_from_to(self,idx_start, idx_end):
         with torch.cuda.stream(self.tos):

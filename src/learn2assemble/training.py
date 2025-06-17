@@ -134,6 +134,7 @@ def train(parts: list[Trimesh],
             ppo_agent.save(saved_model_path, settings)
 
         # policy update
-        loss, entropy = ppo_agent.update_policy(batch_size=training_settings.policy_update_batch_size,
-                                                update_iter=training_settings.K_epochs)
+        loss, sur_loss, val_loss, entropy = ppo_agent.update_policy(batch_size=training_settings.policy_update_batch_size,
+                                                                    update_iter=training_settings.K_epochs)
+        print("Loss : {:.2f} \t\t Sur: {:.2f} \t\t Val: {:.2f}) \t\t Entropy : {:.2f}".format(loss, sur_loss, val_loss, entropy))
         ppo_agent.episode = ppo_agent.episode + 1

@@ -67,7 +67,7 @@ class PPO:
                                     per_num_anneal=ppo_config.per_num_anneal)
 
         self.policy = ActorCriticGATG(env.n_part, settings).to(device)
-        self.optimize_params = {
+        self.optimizer_params = {
             'params': self.policy.actor.parameters(),
             'lr': ppo_config.lr_actor,
             'weight_decay': 0,
@@ -117,18 +117,18 @@ class PPO:
         self.optimizer = torch.optim.Adam([self.optimizer_params])
 
         for epoch_index in range(update_iter):
-            surgate_loss = 0
-            value_loss = 0
+            sur_loss = 0
+            val_loss = 0
+            loss = 0
+            entropy = 0
             self.optimizer.zero_grad()
             for i, batch in enumerate(dataset):
                 if len(batch) > 0:
-                    loss_all, sur_loss, val_loss, entropy_batch = self.train_one_epoch(*batch,
-                                                                                       nsampletot=dataset.nsamples,
-                                                                                       first=(i == 0))
-                    surgate_loss += sur_loss
-                    value_loss += val_loss
-                    loss.append(loss_all)
-                    entropy.append(entropy_batch)
+                    loss_batch, sur_loss_batch, val_loss_batch, entropy_batch = self.train_one_epoch(*batch, dataset.nstates, first_batch =(i == 0))
+                    sur_loss += sur_loss_batch
+                    val_loss += val_loss_batch
+                    loss += loss_batch
+                    entropy += entropy_batch
             self.optimizer.step()
 
         sampled, n = torch.unique(dataset.curriculum_id.to(device), return_counts=True)
@@ -143,7 +143,7 @@ class PPO:
         self.scheduler.step()
         self.optimizer_params['lr'], *_ = self.scheduler.get_last_lr()
 
-        return np.sum(loss), np.mean(entropy)
+        return loss, val_loss, sur_loss, entropy
 
     def train_one_epoch(self,
                         old_states,
@@ -155,14 +155,11 @@ class PPO:
                         weights,
                         entropy_weights,
                         curriculum_id,
-                        nsampletot=None,
-                        first=False):
+                        nstates,
+                        first_batch):
 
         # Evaluating old actions and values
-        if nsampletot is not None:
-            scale = old_actions.shape[0] / nsampletot
-        else:
-            scale = 1
+        batch_percentage = float(old_actions.shape[0]) / nstates
         logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_actions, old_masks)
 
         # match state_values tensor dimensions with rewards tensor
@@ -176,24 +173,25 @@ class PPO:
         surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
         value_loss = self.MseLoss(state_values, rewards)
         surrogate_loss = -torch.min(surr1, surr2)
+
         # final loss of clipped objective PPO
-        loss = (surrogate_loss * weights).mean() + 0.5 * (value_loss * weights).mean() - (
-                entropy_weights * dist_entropy * weights).mean()
-
+        loss = (surrogate_loss * weights).mean() + 0.5 * (value_loss * weights).mean() - (entropy_weights * dist_entropy * weights).mean()
         self.buffer.curriculum_visited[curriculum_id] = True
-
         self.buffer.curriculum_cumsurloss = self.buffer.curriculum_cumsurloss.scatter_reduce(0, curriculum_id,
                                                                                              torch.abs(
                                                                                                  surrogate_loss.detach()),
                                                                                              reduce='sum',
-                                                                                             include_self=not first)
+                                                                                             include_self=not first_batch)
 
         entropy_mean = dist_entropy.mean().item()
-        loss *= scale
-        loss_all = loss.item()
+        loss *= batch_percentage
+        loss_mean = loss.item()
         loss.mean().backward()
 
-        return loss_all, scale * surrogate_loss.mean().item(), scale * value_loss.mean().item(), entropy_mean
+        return (loss_mean,
+                batch_percentage * surrogate_loss.mean().item(),
+                batch_percentage * value_loss.mean().item(),
+                entropy_mean)
 
     def save(self, checkpoint_path, settings):
         d = {'settings': settings,

@@ -116,11 +116,14 @@ class ActorCriticGATG(nn.Module):
 
         self.mask_prob = 1E-9
 
-    def act(self, state, mask):
+    def act(self, state, mask, deterministic=False):
         action_probs, state_val = self.actor(state)
         action_probs = mask * action_probs + mask * self.mask_prob
         dist = Categorical(action_probs)
-        action = dist.sample()
+        if deterministic:
+            action = torch.argmax(dist.probs)
+        else:
+            action = dist.sample()
         action_logprob = dist.log_prob(action)
         return action.detach(), action_logprob.detach(), state_val.detach()
 

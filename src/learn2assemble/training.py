@@ -22,13 +22,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
 
+
 def training_rollout(ppo_agent: PPO,
                      env: DisassemblyEnv,
                      curriculum_inds: np.ndarray,
                      training_settings,
                      queue: Queue):
     part_states = env.curriculum[curriculum_inds, :]
-    ppo_agent.buffer.clear(part_states.shape[0])
+    ppo_agent.buffer.clear_replay_buffer(part_states.shape[0])
     n_env = part_states.shape[0]
     env_inds = np.arange(n_env)
     env.updated_simulation = False
@@ -62,20 +63,76 @@ def training_rollout(ppo_agent: PPO,
         queue.put(data)
     return torch.tensor(rewards, dtype=floatType)
 
+
+def compute_accuracy(env, state_dict, settings, queue):
+    ppo_agent = PPO(env.parts, env.contacts, settings)
+    ppo_agent.policy_old.load_state_dict(state_dict)
+    ppo_agent.policy.load_state_dict(state_dict)
+    ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
+    ppo_agent.buffer.curriculum_inds = np.arange(env.curriculum.shape[0])
+    ppo_agent.buffer.rewards = training_rollout(ppo_agent,
+                                                env,
+                                                ppo_agent.buffer.curriculum_inds,
+                                                SimpleNamespace(**settings["training"]),
+                                                queue)
+    return torch.sum(ppo_agent.buffer.rewards > 0).item() / env.curriculum.shape[0]
+
+
+def evaluation(parts: list[Trimesh],
+               contacts: dict,
+               output_name: str,
+               num_render_debug: int = 4 * 4,
+               queue: Queue = None):
+    pretrained_file = f"./models/{output_name}/policy.pol"
+    with open(pretrained_file, 'rb') as handle:
+        agent = pickle.load(handle)
+        state_dict = agent['state_dict']
+        settings = agent['settings']
+        curriculum = agent.get('curriculum', None)
+        stability_history = agent.get('stability_history', {})
+
+    settings['training']['num_render_debug'] = num_render_debug
+
+    env = DisassemblyEnv(parts, contacts, settings=settings)
+
+    # single forward curriculum (training)
+    torch_geometric.seed.seed_everything(settings["env"]["seed"])
+    if curriculum is None:
+        _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
+    env.set_curriculum(curriculum)
+    accuracy = compute_accuracy(env, state_dict, settings, queue)
+    print(f"Train Size:\t {env.curriculum.shape[0]}", "\t\t", "Accuracy:\t", accuracy)
+
+    # double forward curriculum (testing)
+    settings["search"]["n_beam"] *= 2
+    torch_geometric.seed.seed_everything(settings["env"]["seed"])
+    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
+    new_curriculum = []
+    for part_state in curriculum:
+        if env.get_history(part_state) == 0:
+            new_curriculum.append(part_state)
+    new_curriculum = np.vstack(new_curriculum)
+    env.set_curriculum(curriculum)
+    env.stability_history = stability_history
+    accuracy = compute_accuracy(env, state_dict, settings, queue)
+    print(f"Test Size:\t {env.curriculum.shape[0]}", "\t\t", "Accuracy:\t", accuracy)
+
+
 def train(parts: list[Trimesh],
           contacts: dict,
-          settings:dict,
+          settings: dict,
           queue: Queue = None):
     training_settings = set_default(settings,
-                                   "training", {
-                                       "max_train_epochs": 50000,
-                                       "save_delta_accuracy": 0.01,
-                                       "print_epochs": 1,
-                                       "policy_update_batch_size": 2048,
-                                       "K_epochs": 5,
-                                       "output_name": "example",
+                                    "training", {
+                                        "max_train_epochs": 50000,
+                                        "save_delta_accuracy": 0.01,
+                                        "print_epochs": 1,
+                                        "policy_update_batch_size": 2048,
+                                        "K_epochs": 5,
+                                        "output_name": "example",
                                         "num_render_debug": 8 * 8,
-    })
+                                        "accuracy_terminate_threshold": 0.98,
+                                    })
     training_settings = SimpleNamespace(**training_settings)
 
     # policy output folder
@@ -84,56 +141,63 @@ def train(parts: list[Trimesh],
         os.makedirs(folder_path)  # Create the folder
     saved_model_path = f"{folder_path}/policy.pol"
 
-    # create env
+    # create env and ppo
     env = DisassemblyEnv(parts, contacts, settings=settings)
+    ppo_agent = PPO(parts, contacts, settings)
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
 
     # forward curriculum
     _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
     env.set_curriculum(curriculum)
-
-    # create ppo agent
-    ppo_agent = PPO(env, settings)
+    ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
 
     print(f"Start training, curriculum: {env.curriculum.shape[0]}")
     ppo_agent.print_iter = 0
     print_epoch = training_settings.print_epochs
-    ppo_agent.episode_timer = time.perf_counter()
 
     # training
-    while ppo_agent.episode <= training_settings.max_train_epochs and ppo_agent.saved_accuracy < 1:
-        curriculum_inds = ppo_agent.buffer.sample_curriculum(env.num_rollouts)
+    while ppo_agent.episode <= training_settings.max_train_epochs:
+        ppo_agent.episode_timer = time.perf_counter()
+
+        # the first several run is to visit all curriculum
+        curriculum_inds, sample_new_curriculum = ppo_agent.buffer.sample_curriculum(env.num_rollouts)
         ppo_agent.buffer.curriculum_inds = curriculum_inds
-        ppo_agent.buffer.rewards = training_rollout(ppo_agent, env, curriculum_inds, training_settings, queue)
+        rewards = ppo_agent.buffer.rewards = training_rollout(ppo_agent, env, curriculum_inds, training_settings, queue)
 
         # update entropy weights
-        rewards = ppo_agent.buffer.rewards
         inds = curriculum_inds.to(device)
-        failed_inds = inds[(rewards < 0)]
-        success_inds = inds[(rewards > 0)]
-        ppo_agent.num_success[success_inds] += 1
-        ppo_agent.num_failed[success_inds] = 0
-        ppo_agent.num_failed[failed_inds] = ppo_agent.num_failed[failed_inds] + 1
-        ppo_agent.buffer.modify_entropy(failed_inds, success_inds)
-
-        # print status
-        ppo_agent.print_iter = ppo_agent.print_iter + 1
-        if ppo_agent.print_iter % print_epoch == print_epoch - 1:
-            elaspe = time.perf_counter() - ppo_agent.episode_timer
-            accuracy = (torch.sum(rewards > 0) / env.num_rollouts).item()
-            print("Episode : {} \t\t Accuracy : {:.2f}\t\t Time : {:.2f}".format(ppo_agent.episode,
-                                                                             accuracy,
-                                                                             elaspe))
-            ppo_agent.episode_timer = time.perf_counter()
+        success_inds, failed_inds = inds[(rewards > 0)], inds[(rewards < 0)]
+        ppo_agent.buffer.num_success[success_inds] += 1
+        ppo_agent.buffer.num_failed[success_inds] = 0
+        ppo_agent.buffer.num_failed[failed_inds] = ppo_agent.buffer.num_failed[failed_inds] + 1
+        ppo_agent.buffer.modify_entropy()
 
         # save policy
-        delta_accuracy = training_settings.save_delta_accuracy
-        if accuracy > ppo_agent.saved_accuracy + delta_accuracy:
-            ppo_agent.saved_accuracy = accuracy
-            ppo_agent.save(saved_model_path, settings)
+        accuracy_of_sample_curriculum = (torch.sum(rewards > 0) / rewards.shape[0]).item()
+        accuracy_of_entire_curriculum = None
+        if (
+                accuracy_of_sample_curriculum > ppo_agent.accuracy_of_sample_curriculum + training_settings.save_delta_accuracy
+                and not sample_new_curriculum):
+            ppo_agent.accuracy_of_sample_curriculum = accuracy_of_sample_curriculum
+            accuracy_of_entire_curriculum = compute_accuracy(env, ppo_agent.policy_old.state_dict(), settings, queue)
+            if accuracy_of_entire_curriculum > ppo_agent.accuracy_of_entire_curriculum:
+                ppo_agent.accuracy_of_entire_curriculum = accuracy_of_entire_curriculum
+                ppo_agent.save(saved_model_path, settings, env.curriculum, env.stability_history)
 
         # policy update
-        loss, sur_loss, val_loss, entropy = ppo_agent.update_policy(batch_size=training_settings.policy_update_batch_size,
-                                                                    update_iter=training_settings.K_epochs)
-        print("Loss : {:.2f} \t\t Sur: {:.2f} \t\t Val: {:.2f} \t\t Entropy : {:.2f}".format(loss, sur_loss, val_loss, entropy))
+        loss, sur_loss, val_loss, entropy = ppo_agent.update_policy(
+            batch_size=training_settings.policy_update_batch_size,
+            update_iter=training_settings.K_epochs)
+
+        # print status
+        elaspe = time.perf_counter() - ppo_agent.episode_timer
+        print("")
+        print("Episode : {} \t\t Accuracy : {:.2f}\t\t Time : {:.2f}".format(ppo_agent.episode,
+                                                                             accuracy_of_sample_curriculum, elaspe))
+        print("Loss : {:.2e} \t\t Sur: {:.2e} \t\t Val: {:.2e} \t\t Entropy : {:.2e}".format(loss, sur_loss, val_loss,
+                                                                                             entropy))
+        if accuracy_of_entire_curriculum is not None:
+            print(f"Saved! accuracy of entire curriculum:\t", accuracy_of_entire_curriculum)
+            if accuracy_of_entire_curriculum > training_settings.accuracy_terminate_threshold:
+                break
         ppo_agent.episode = ppo_agent.episode + 1

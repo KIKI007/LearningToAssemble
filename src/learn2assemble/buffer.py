@@ -49,7 +49,6 @@ class RolloutBuffer:
 
     def __init__(self,
                  n_robot,
-                 num_curriculums,
                  gamma,
                  base_entropy_weight,
                  entropy_weight_increase,
@@ -60,34 +59,38 @@ class RolloutBuffer:
 
         self.n_robot = n_robot
         self.gamma = gamma
-        self.history = {}
-        self.clear()
-        self.curriculum_visited = torch.zeros(num_curriculums, device = device, dtype = torch.bool)
-        self.curriculum_cumsurloss = torch.zeros(num_curriculums, device = device, dtype=floatType)
-        self.curriculum_rank = torch.arange(num_curriculums, dtype=intType, device=device)
-
-        self.entropy_weights = base_entropy_weight*torch.ones((num_curriculums), dtype=floatType, device=device)
-        self.per_alpha = per_alpha
-        self.per_beta = per_beta
-
-        self.num_step_anneal = per_num_anneal
-        self.per_beta_increase = (1.0 - self.per_beta) / per_num_anneal
-
         self.base_entropy_weight = base_entropy_weight
         self.entropy_weight_increase = entropy_weight_increase
         self.max_entropy_weight = max_entropy_weight
+
+        # priortize experience replay
+        self.per_alpha = per_alpha
+        self.per_beta = per_beta
+        self.per_beta_increase = (1.0 - self.per_beta) / per_num_anneal
+        self.num_step_anneal = per_num_anneal
+
+        self.clear_replay_buffer()
+        self.reset_curriculum(0)
 
     def update_per_beta(self):
         if self.num_step_anneal > 0:
             self.num_step_anneal -= 1
             self.per_beta += self.per_beta_increase
 
-    def modify_entropy(self, failed_inds, success_inds):
-        increasable = self.entropy_weights[failed_inds] < self.max_entropy_weight
-        self.entropy_weights[failed_inds[increasable]] += self.entropy_weight_increase
-        self.entropy_weights[success_inds] = self.base_entropy_weight
+    def modify_entropy(self):
+        increasable = self.entropy_weights[self.num_failed] < self.max_entropy_weight
+        self.entropy_weights[self.num_failed[increasable]] += self.entropy_weight_increase
+        self.entropy_weights[self.num_success] = self.base_entropy_weight
 
-    def clear(self, num_env=0):
+    def reset_curriculum(self, n_curriculums):
+        self.num_failed = torch.zeros(n_curriculums, dtype=intType, device=device)
+        self.num_success = torch.zeros(n_curriculums, dtype=intType, device=device)
+        self.curriculum_visited = torch.zeros(n_curriculums, device = device, dtype = torch.bool)
+        self.curriculum_cumsurloss = torch.zeros(n_curriculums, device = device, dtype=floatType)
+        self.curriculum_rank = torch.arange(n_curriculums, dtype=intType, device=device)
+        self.entropy_weights = self.base_entropy_weight * torch.ones((n_curriculums), dtype=floatType, device=device)
+
+    def clear_replay_buffer(self, num_env=0):
         self.actions = [[] for _ in range(num_env)]
         self.states = [[] for _ in range(num_env)]
         self.logprobs = [[] for _ in range(num_env)]
@@ -110,22 +113,23 @@ class RolloutBuffer:
     def sample_curriculum(self, num_rollouts):
         visited = self.curriculum_visited
         rank = self.curriculum_rank
-        if (visited == False).sum() > num_rollouts:
-            print("Exploring new environments")
+        sample_new_curriculum = (visited == False).sum() > num_rollouts
+        if sample_new_curriculum:
             sample_weights = torch.zeros_like(visited).to(floatType)
             sample_weights[visited == False] = 1.0 / (visited == False).sum()
             curriculum_inds = torch.multinomial(sample_weights, num_rollouts,False)
         else:
             inds = torch.arange(1, rank.shape[0] + 1, device=device, dtype=floatType)
-            sample_weights =torch.pow(inds, -self.per_alpha) / torch.pow(inds, -self.per_alpha).sum()
+            sample_weights = torch.pow(inds, -self.per_alpha) / torch.pow(inds, -self.per_alpha).sum()
             curriculum_inds = torch.multinomial(sample_weights[rank], num_rollouts,True)
-        return curriculum_inds.cpu()
+        return curriculum_inds.cpu(), sample_new_curriculum
 
     def get_current_states_for_rendering(self, num_render):
         batch_part_states = []
         batch_stability = []
         num_render = min(num_render, self.num_envs)
-        for env_id in range(num_render):
+        inds = np.arange(start=self.num_envs - num_render, stop=self.num_envs)
+        for env_id in inds:
             batch_part_states.append(self.next_states[env_id][-1])
             batch_stability.append(self.next_stability[env_id][-1])
         batch_part_states = np.vstack(batch_part_states)

@@ -145,7 +145,7 @@ def forward_curriculum(parts: list[Trimesh],
     boundary_part_ids = env.get("boundary_part_ids", [])
     n_robot = env.get("n_robot", 2)
 
-    search = set_default(settings,"search",{"n_beam": 64, "verbose": True})
+    search = set_default(settings,"search",{"n_beam": 64, "verbose": False})
 
     n_beam = search["n_beam"]
     verbose = search["verbose"]

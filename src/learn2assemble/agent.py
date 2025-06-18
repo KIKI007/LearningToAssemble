@@ -23,8 +23,9 @@ floatType = torch.float32
 intType = torch.int32
 from learn2assemble.disassemly_env import Timer
 
+
 class PPO:
-    def __init__(self, env, settings):
+    def __init__(self, parts, contacts, settings):
         self.scheduler = None
         ppo_config = set_default(settings,
                                  "ppo",
@@ -44,20 +45,18 @@ class PPO:
                                      "per_beta": 0.1,
                                      "per_num_anneal": 500,
                                  })
-
+        n_robot = settings["env"]["n_robot"]
         ppo_config = SimpleNamespace(**ppo_config)
-        self.graph_constructor = GFTFGraphConstructor(env.parts, env.contacts)
+        self.graph_constructor = GFTFGraphConstructor(parts, contacts)
 
-        n_curriculums = env.curriculum.shape[0]
-        self.saved_accuracy = 0
+        self.accuracy_of_sample_curriculum = 0
+        self.accuracy_of_entire_curriculum = 0
         self.episode = 0
+        self.deterministic = False
         self.eps_clip = ppo_config.eps_clip
         self.timer = Timer()
 
-        self.num_failed = torch.zeros(n_curriculums, dtype=intType, device=device)
-        self.num_success = torch.zeros(n_curriculums, dtype=intType, device=device)
-        self.buffer = RolloutBuffer(n_robot=env.n_robot,
-                                    num_curriculums=n_curriculums,
+        self.buffer = RolloutBuffer(n_robot=n_robot,
                                     gamma=ppo_config.gamma,
                                     base_entropy_weight=ppo_config.base_entropy_weight,
                                     entropy_weight_increase=ppo_config.entropy_weight_increase,
@@ -66,7 +65,7 @@ class PPO:
                                     per_beta=ppo_config.per_beta,
                                     per_num_anneal=ppo_config.per_num_anneal)
 
-        self.policy = ActorCriticGATG(env.n_part, settings).to(device)
+        self.policy = ActorCriticGATG(len(parts), settings).to(device)
         self.optimizer_params = {
             'params': self.policy.actor.parameters(),
             'lr': ppo_config.lr_actor,
@@ -77,7 +76,7 @@ class PPO:
         self.MseLoss = nn.MSELoss(reduction='none')
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=ppo_config.lr_milestones)
 
-        self.policy_old = ActorCriticGATG(env.n_part, settings).to(device)
+        self.policy_old = ActorCriticGATG(len(parts), settings).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
     def select_action(self,
@@ -94,7 +93,7 @@ class PPO:
         # inference
         self.policy_old.eval()
         with torch.no_grad():
-            action, action_logprob, state_val = self.policy_old.act(batch_graph, masks)
+            action, action_logprob, state_val = self.policy_old.act(batch_graph, masks, self.deterministic)
 
         # add to buffer
         namelist = ['states', 'actions', 'logprobs', "state_values", "masks"]
@@ -124,7 +123,10 @@ class PPO:
             self.optimizer.zero_grad()
             for i, batch in enumerate(dataset):
                 if len(batch) > 0:
-                    loss_batch, sur_loss_batch, val_loss_batch, entropy_batch = self.train_one_epoch(*batch, dataset.nstates, first_batch =(i == 0))
+                    loss_batch, sur_loss_batch, val_loss_batch, entropy_batch = self.train_one_epoch(*batch,
+                                                                                                     dataset.nstates,
+                                                                                                     first_batch=(
+                                                                                                                 i == 0))
                     sur_loss += sur_loss_batch
                     val_loss += val_loss_batch
                     loss += loss_batch
@@ -139,7 +141,7 @@ class PPO:
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         # reset optimizer
-        self.buffer.clear()
+        self.buffer.clear_replay_buffer()
         self.scheduler.step()
         self.optimizer_params['lr'], *_ = self.scheduler.get_last_lr()
 
@@ -175,7 +177,8 @@ class PPO:
         surrogate_loss = -torch.min(surr1, surr2)
 
         # final loss of clipped objective PPO
-        loss = (surrogate_loss * weights).mean() + 0.5 * (value_loss * weights).mean() - (entropy_weights * dist_entropy * weights).mean()
+        loss = (surrogate_loss * weights).mean() + 0.5 * (value_loss * weights).mean() - (
+                    entropy_weights * dist_entropy * weights).mean()
         self.buffer.curriculum_visited[curriculum_id] = True
         self.buffer.curriculum_cumsurloss = self.buffer.curriculum_cumsurloss.scatter_reduce(0, curriculum_id,
                                                                                              torch.abs(
@@ -191,10 +194,12 @@ class PPO:
         return (loss_mean,
                 batch_percentage * surrogate_loss.mean().item(),
                 batch_percentage * value_loss.mean().item(),
-                entropy_mean)
+                batch_percentage * entropy_mean)
 
-    def save(self, checkpoint_path, settings):
+    def save(self, checkpoint_path, settings, curriculum, stability_history):
         d = {'settings': settings,
-             'state_dict': self.policy_old.state_dict()}
+             'state_dict': self.policy_old.state_dict(),
+             "curriculum": curriculum,
+             "stability_history": stability_history,}
         with open(checkpoint_path, 'wb') as handle:
             pickle.dump(d, handle, protocol=pickle.HIGHEST_PROTOCOL)

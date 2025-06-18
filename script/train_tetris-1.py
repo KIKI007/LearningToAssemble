@@ -1,6 +1,6 @@
 from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
 from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-from learn2assemble.training import train
+from learn2assemble.training import train, evaluation
 from learn2assemble.render import render_batch_simulation
 import torch
 from multiprocessing import Queue, Process
@@ -32,7 +32,8 @@ if __name__ == "__main__":
             "float_type": torch.float32,
         },
         "search": {
-            "n_beam": 64,
+            "n_beam": 128,
+            "verbose": False,
         },
         "policy": {
             "gat_layers": 8,
@@ -50,27 +51,38 @@ if __name__ == "__main__":
             "max_entropy_weight": 0.01,
 
             "lr_milestones": [100, 300],
-            "num_step_anneal": 500,
             "lr_actor": 2e-3,
             "betas_actor": [0.95, 0.999],
+
+            "per_alpha": 0.8,
+            "per_beta": 0.1,
+            "per_num_anneal": 500,
         },
         "training": {
             "max_train_epochs": 50000,
             "save_delta_accuracy": 0.01,
             "print_epochs": 1,
             "policy_update_batch_size": 2048,
-            "K_epochs": 5,
+            "K_epochs": 10,
             "output_name": "tetris-1",
-            "num_render_debug": 8 * 8,
+            "num_render_debug": 16 * 16,
+            "accuracy_terminate_threshold": 0.98
     }
     }
 
-    queue = Queue()
     contacts = compute_assembly_contacts(parts, settings)
+
     train(parts, contacts, settings, None)
-    #p1 = Process(target=train, args=(parts, contacts, settings, None))
-    #p2 = Process(target=render_batch_simulation, args=(parts, settings["env"]["boundary_part_ids"], queue))
-    # p2.start()
-    #p1.start()
-    #p1.join()
-    # p2.join()
+
+    # gui
+    evaluation_gui = False
+    queue = Queue()
+    if not evaluation_gui:
+        evaluation(parts, contacts, "tetris-1", 4*4, None)
+    else:
+        p1 = Process(target=evaluation, args=(parts, contacts, 'tetris-1', 16 * 16, queue))
+        p2 = Process(target=render_batch_simulation, args=(parts, settings["env"]["boundary_part_ids"], queue))
+        p2.start()
+        p1.start()
+        p1.join()
+        p2.join()

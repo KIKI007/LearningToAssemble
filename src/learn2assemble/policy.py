@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 import torch_geometric
 from torch_geometric.nn import aggr
-from learn2assemble import set_default
+from learn2assemble import update_default_settings
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
@@ -86,9 +86,9 @@ class GATGFTFSharedEncoder(nn.Module):
 class ActorCriticGATG(nn.Module):
     def __init__(self, n_part, settings):
         super(ActorCriticGATG, self).__init__()
-        policy_config = set_default(settings,
+        policy_config = update_default_settings(settings,
                                     'policy',
-                                    {
+                                                {
                                         "gat_layers": 8,
                                         "gat_heads": 1,
                                         "gat_hidden_dims": 16,
@@ -121,7 +121,7 @@ class ActorCriticGATG(nn.Module):
         action_probs = mask * action_probs + mask * self.mask_prob
         dist = Categorical(action_probs)
         if deterministic:
-            action = torch.argmax(dist.probs)
+            action = torch.argmax(dist.probs, dim = -1)
         else:
             action = dist.sample()
         action_logprob = dist.log_prob(action)
@@ -138,46 +138,21 @@ class ActorCriticGATG(nn.Module):
 
 if __name__ == "__main__":
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings
     from learn2assemble.graph import GFTFGraphConstructor
     import numpy as np
     import time
 
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
-    settings = {
-        "contact_settings":
-        {
-            "shrink_ratio": 0.0,
-        },
-        "rbe": {
-            "density": 1E4,
-            "mu": 0.55,
-            "velocity_tol": 1e-2,
-            "boundary_part_ids": [0],
-            "verbose": False,
-        },
-        "admm": {
-            "Ccp": 1E6,
-            "evaluate_it": 200,
-            "max_iter": 2000,
-            "float_type": torch.float32,
-        },
-        "policy": {
-            "gat_layers": 8,
-            "gat_heads": 1,
-            "gat_hidden_dims": 16,
-            "gat_dropout": 0.0,
-            "centroids": False
-        }
-    }
+
 
     contacts = compute_assembly_contacts(parts)
     graph_constructor = GFTFGraphConstructor(parts, contacts)
-    torch.manual_seed(100)
+    np.random.seed(100)
 
     graphs = []
     nbatch = 1024
-    part_states = torch.randint(low=0, high=3, size=(nbatch, len(parts)), dtype=torch.int32, device="cpu")
+    part_states = np.random.randint(low=0, high=3, size=(nbatch, len(parts)), dtype=np.int32)
     start = time.perf_counter()
     graphs = graph_constructor.graphs(part_states)
     print("build graph:\t", time.perf_counter() - start)
@@ -186,7 +161,7 @@ if __name__ == "__main__":
     print("batch graph:\t", time.perf_counter() - start)
 
     start = time.perf_counter()
-    A2C = ActorCriticGATG(len(parts), settings).to(device)
+    A2C = ActorCriticGATG(len(parts), default_settings).to(device)
     mask = torch.ones((nbatch, len(parts) * 2), device=device, dtype=bool)
     a, alp, v = A2C.act(batch_graph, mask)
     print("inference graph:\t", time.perf_counter() - start)

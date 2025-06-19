@@ -4,7 +4,7 @@ from scipy.sparse import coo_matrix
 import math
 import torch
 import scipy
-from learn2assemble import set_default
+from learn2assemble import update_default_settings
 
 
 def num_vars(parts, contacts, nt=8):
@@ -223,7 +223,7 @@ def init_rbe(parts: list[Trimesh],
              contacts: list[dict],
              settings: dict):
 
-    rbe = set_default(
+    rbe = update_default_settings(
         settings,
         "rbe",
         {

@@ -5,12 +5,10 @@ import torch
 import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
-from learn2assemble.RBE import *
+from learn2assemble.rbe import *
 from types import SimpleNamespace
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
 def from_scipy_to_torch_sparse(A: sp.sparse.coo_matrix,
                                floatType=torch.float32):
     return torch.sparse_coo_tensor(torch.LongTensor(np.vstack((A.row, A.col))),
@@ -22,9 +20,8 @@ def init_admm(parts: list[Trimesh],
               contacts: list[dict],
               settings: dict):
 
-    admm = set_default(settings,
-                       "admm",
-                       {
+    admm = update_default_settings(settings,
+                       "admm", {
                            "sigma": 1E-6,
                            "r": 0.1,
                            "alpha": 1.6,
@@ -214,7 +211,7 @@ def simulate(parts: list[Trimesh],
 
 
 if __name__ == '__main__':
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings
     from learn2assemble.render import *
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import polyscope as ps
@@ -224,32 +221,12 @@ if __name__ == '__main__':
     part_states = np.zeros((1, len(parts)))
     part_states[0, 3] = 1
     part_states[0, 5] = 1
-    b = 0
-    part_states[0, b] = 2
+    part_states[0, 0] = 2
 
-    settings = {
-        "contact_settings": {
-            "shrink_ratio": 0.1,
-        },
-        "rbe": {
-            "density": 1E2,
-            "mu": 0.55,
-            "velocity_tol": 1e-2,
-            "verbose": False,
-        },
-        "admm": {
-            "Ccp": 1E6,
-            "evaluate_it": 200,
-            "max_iter": 3000,
-            "float_type": torch.float32,
-        },
-        "env": {
-            "boundary_part_ids": [],
-        }
-    }
+    default_settings["assembly"]["contact_shrink_ratio"] = 0.1 # for robustnessly computing the contact surfaces
 
-    contacts = compute_assembly_contacts(parts, settings)
-    v_fp32, stable_fp32 = simulate(parts, contacts, part_states, settings)
+    contacts = compute_assembly_contacts(parts, default_settings)
+    v_fp32, stable_fp32 = simulate(parts, contacts, part_states, default_settings)
     t = 0
     def callback():
         global t

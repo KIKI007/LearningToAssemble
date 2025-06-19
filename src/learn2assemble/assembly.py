@@ -10,7 +10,7 @@ from shapely.geometry import Polygon
 from shapely import geometry
 from types import SimpleNamespace
 
-from learn2assemble import set_default
+from learn2assemble import update_default_settings
 
 def shrink_or_swell_shapely_polygon(my_polygon, factor=0.10, swell=False):
     ''' returns the shapely polygon which is smaller or bigger by passed factor.
@@ -164,16 +164,16 @@ def fast_collision_check_using_convexhull(parts: list[Trimesh],
 
 def compute_assembly_contacts(parts: list[Trimesh],
                               settings:dict = {}):
-    contact_settings = set_default(
+    contact_settings = update_default_settings(
         settings,
-        "contact_settings",
+        "assembly",
         {
             "dist_tol": 1E-3,
             "nrm_tol": 1E-3,
             "area_tol": 1E-5,
             "simplify_tol": 1E-4,
             "collision_scale": 1.1,
-            "shrink_ratio": 0.0
+            "contact_shrink_ratio": 0.0
         }
     )
 
@@ -187,7 +187,7 @@ def compute_assembly_contacts(parts: list[Trimesh],
                                                                 nrm_tol=n.nrm_tol,
                                                                 area_tol=n.area_tol,
                                                                 simplify_tol=n.simplify_tol,
-                                                                shrink_ratio=n.shrink_ratio)
+                                                                shrink_ratio=n.contact_shrink_ratio)
         for contact in two_parts_contacts:
             contact["iA"] = partIDA
             contact["iB"] = partIDB
@@ -222,26 +222,18 @@ def load_assembly_from_files(obj_folder_path):
 
 
 if __name__ == '__main__':
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings
     from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts
     import polyscope as ps
 
+    default_settings["assembly"]["contact_shrink_ratio"] = 0.1 # for robustnessly computing the contact surfaces
+
     init_polyscope()
-    settings = {
-        "contact_settings": {
-            "dist_tol": 1E-3,
-            "nrm_tol": 1E-3,
-            "area_tol": 1E-5,
-            "simplify_tol": 1E-4,
-            "shrink_ratio": 0.1,
-            "collision_scale": 1.1
-        }
-    }
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     part_states = np.ones(len(parts))
     part_states[0] = 2
     part_states[3] = 0
-    contacts = compute_assembly_contacts(parts, settings)
+    contacts = compute_assembly_contacts(parts, default_settings)
     draw_contacts(contacts, part_states, enable=True)
     draw_assembly(parts, part_states)
     ps.show()

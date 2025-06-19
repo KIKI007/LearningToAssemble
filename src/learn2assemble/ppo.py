@@ -11,25 +11,24 @@ import numpy as np
 from trimesh import Trimesh
 from time import perf_counter
 
-from learn2assemble import set_default
+from learn2assemble import update_default_settings
 from learn2assemble.graph import GFTFGraphConstructor
 from learn2assemble.policy import ActorCriticGATG
 from learn2assemble.buffer import RolloutBuffer
-from learn2assemble.disassemly_env import DisassemblyEnv
+from learn2assemble.env import DisassemblyEnv, Timer
 from learn2assemble.curriculum import forward_curriculum
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
-from learn2assemble.disassemly_env import Timer
 
 
 class PPO:
     def __init__(self, parts, contacts, settings):
         self.scheduler = None
-        ppo_config = set_default(settings,
+        ppo_config = update_default_settings(settings,
                                  "ppo",
-                                 {
+                                             {
                                      "gamma": 0.95,
                                      "eps_clip": 0.2,
 

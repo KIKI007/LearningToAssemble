@@ -20,7 +20,6 @@ def render_batch_simulation(parts: list[Trimesh], boundary_part_ids: list = [], 
     #storage = []
     #step_id = 0
     camera = {"farClipRatio":20.0,"fov":45.0,"nearClipRatio":0.005,"projectionMode":"Perspective","viewMat":[0.960128843784332,0.279557704925537,-6.99097890688449e-10,-5.19866847991943,-0.19538114964962,0.671027898788452,0.715225756168365,-0.13018886744976,0.199946850538254,-0.686708748340607,0.698893308639526,-9.46305561065674,0.0,0.0,0.0,1.0],"windowHeight":2019,"windowWidth":3840}
-    #camera = {"farClipRatio":20.0,"fov":45.0,"nearClipRatio":0.005,"projectionMode":"Perspective","viewMat":[0.955949544906616,0.293529838323593,1.27090937773744e-09,-13.6258058547974,-0.203055769205093,0.661302387714386,0.722114562988281,-2.85685396194458,0.211961284279823,-0.690305352210999,0.691774010658264,-26.6040363311768,0.0,0.0,0.0,1.0],"windowHeight":2019,"windowWidth":3840}
     camera = json.dumps(camera)
     def callback():
         #global storage, step_id

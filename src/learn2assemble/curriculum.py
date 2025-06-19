@@ -4,7 +4,7 @@ from scipy.cluster.vq import kmeans2
 from trimesh import Trimesh
 import learn2assemble.simulator
 import time
-from learn2assemble import set_default
+from learn2assemble import update_default_settings
 
 def cluster(part_states: np.ndarray,
             prev_inds: np.ndarray,
@@ -145,10 +145,10 @@ def forward_curriculum(parts: list[Trimesh],
     boundary_part_ids = env.get("boundary_part_ids", [])
     n_robot = env.get("n_robot", 2)
 
-    search = set_default(settings,"search",{"n_beam": 64, "verbose": False})
+    curriculum_settings = update_default_settings(settings, "curriculum", {"n_beam": 64, "verbose": False})
 
-    n_beam = search["n_beam"]
-    verbose = search["verbose"]
+    n_beam = curriculum_settings["n_beam"]
+    verbose = curriculum_settings["verbose"]
 
     # init states
     part_states = np.zeros((1, len(parts)), dtype=np.int32)
@@ -202,40 +202,15 @@ def forward_curriculum(parts: list[Trimesh],
 
 
 if __name__ == '__main__':
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import torch
 
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
+    default_settings["rbe"]["density"] = 1E4
 
-    settings = {
-        "contact_settings":
-        {
-            "shrink_ratio": 0.0,
-        },
-        "rbe": {
-            "density": 1E4,
-            "mu": 0.55,
-            "velocity_tol": 1e-2,
-            "verbose": False,
-        },
-        "admm": {
-            "Ccp": 1E6,
-            "evaluate_it": 100,
-            "max_iter": 1000,
-            "float_type": torch.float32,
-        },
-        "search":{
-            "n_beam" : 256
-        },
-        "env":{
-            "boundary_part_ids": [0],
-            "n_robot": 2,
-        }
-    }
-
-    contacts = compute_assembly_contacts(parts, settings)
-    succeed, solution, curriculum = forward_curriculum(parts, contacts, settings)
+    contacts = compute_assembly_contacts(parts, default_settings)
+    succeed, solution, curriculum = forward_curriculum(parts, contacts, default_settings)
     print("succeed:\t", succeed)
 
     from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts

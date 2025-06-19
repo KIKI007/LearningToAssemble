@@ -8,10 +8,10 @@ from pathlib import Path
 import polyscope as ps
 import torch_geometric
 
-from learn2assemble import set_default
-from learn2assemble.disassemly_env import DisassemblyEnv
+from learn2assemble import update_default_settings
+from learn2assemble.env import DisassemblyEnv
 from learn2assemble.curriculum import forward_curriculum
-from learn2assemble.agent import PPO
+from learn2assemble.ppo import PPO
 
 from trimesh import Trimesh
 import numpy as np
@@ -21,7 +21,6 @@ from multiprocessing import Queue
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
-
 
 def training_rollout(ppo_agent: PPO,
                      env: DisassemblyEnv,
@@ -65,9 +64,11 @@ def training_rollout(ppo_agent: PPO,
 
 
 def compute_accuracy(env, state_dict, settings, queue):
+
     ppo_agent = PPO(env.parts, env.contacts, settings)
     ppo_agent.policy_old.load_state_dict(state_dict)
     ppo_agent.policy.load_state_dict(state_dict)
+    ppo_agent.deterministic = True
     ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
     ppo_agent.buffer.curriculum_inds = np.arange(env.curriculum.shape[0])
     ppo_agent.buffer.rewards = training_rollout(ppo_agent,
@@ -80,10 +81,10 @@ def compute_accuracy(env, state_dict, settings, queue):
 
 def evaluation(parts: list[Trimesh],
                contacts: dict,
-               output_name: str,
+               policy_name: str,
                num_render_debug: int = 4 * 4,
                queue: Queue = None):
-    pretrained_file = f"./models/{output_name}/policy.pol"
+    pretrained_file = f"./models/{policy_name}.pol"
     with open(pretrained_file, 'rb') as handle:
         agent = pickle.load(handle)
         state_dict = agent['state_dict']
@@ -104,7 +105,7 @@ def evaluation(parts: list[Trimesh],
     print(f"Train Size:\t {env.curriculum.shape[0]}", "\t\t", "Accuracy:\t", accuracy)
 
     # double forward curriculum (testing)
-    settings["search"]["n_beam"] *= 2
+    settings["curriculum"]["n_beam"] *= 2
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
     _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
     new_curriculum = []
@@ -122,24 +123,24 @@ def train(parts: list[Trimesh],
           contacts: dict,
           settings: dict,
           queue: Queue = None):
-    training_settings = set_default(settings,
+    training_settings = update_default_settings(settings,
                                     "training", {
                                         "max_train_epochs": 50000,
                                         "save_delta_accuracy": 0.01,
                                         "print_epochs": 1,
                                         "policy_update_batch_size": 2048,
                                         "K_epochs": 5,
-                                        "output_name": "example",
+                                        "policy_name": "example",
                                         "num_render_debug": 8 * 8,
                                         "accuracy_terminate_threshold": 0.98,
                                     })
     training_settings = SimpleNamespace(**training_settings)
 
     # policy output folder
-    folder_path = f"./models/{training_settings.output_name}"
+    folder_path = f"./models"
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)  # Create the folder
-    saved_model_path = f"{folder_path}/policy.pol"
+    saved_model_path = f"{folder_path}/{training_settings.policy_name}.pol"
 
     # create env and ppo
     env = DisassemblyEnv(parts, contacts, settings=settings)

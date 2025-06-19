@@ -5,7 +5,7 @@ import learn2assemble.simulator
 from time import perf_counter
 
 from trimesh import Trimesh
-from learn2assemble import set_default
+from learn2assemble import update_default_settings
 from learn2assemble.buffer import RolloutBuffer
 from multiprocessing import Process, Queue
 
@@ -36,16 +36,15 @@ class DisassemblyEnv:
                  contacts: dict,
                  settings: dict = {}):
 
-        env_settings = set_default(settings,
+        env_settings = update_default_settings(settings,
                                    "env",
-                                   {
+                                               {
                                        "n_robot": 2,
                                        "boundary_part_ids": [0],
                                        "sim_buffer_size": 64,
                                        "num_rollouts": 64,
                                        "seed": 0,
                                        "verbose": False,
-                                       "alpha": 0.8,
                                    })
 
         env_settings = SimpleNamespace(**env_settings)
@@ -54,7 +53,6 @@ class DisassemblyEnv:
         self.parts = parts
         self.contacts = contacts
         self.verbose = env_settings.verbose
-        self.alpha = env_settings.alpha
 
         self.n_robot = env_settings.n_robot
         self.n_part = len(parts)
@@ -237,7 +235,6 @@ def env_debug(parts:list[Trimesh], settings:dict, queue: Queue):
 
     part_states, env_inds = env.reset()
     buffer = RolloutBuffer(n_robot=env.n_robot,
-                           num_curriculums=1,
                            gamma=0,
                            base_entropy_weight=0,
                            entropy_weight_increase=0,
@@ -245,7 +242,8 @@ def env_debug(parts:list[Trimesh], settings:dict, queue: Queue):
                            per_alpha=0.8,
                            per_beta=0.1,
                            per_num_anneal=1)
-    buffer.clear(env.num_rollouts)
+    buffer.clear_replay_buffer(env.num_rollouts)
+    buffer.reset_curriculum(1)
     n_step = 0
     while True:
         current_part_states = part_states[env_inds, :]
@@ -259,7 +257,7 @@ def env_debug(parts:list[Trimesh], settings:dict, queue: Queue):
         buffer.add("next_stability", next_stability, env_inds)
 
         if queue is not None:
-            data = buffer.get_current_states_for_rendering(env.num_rollouts)
+            data = buffer.get_current_states_for_rendering(settings["training"]["num_render_debug"])
             queue.put(data)
 
         env_inds, _ = buffer.get_valid_env_inds(env)
@@ -274,46 +272,21 @@ def env_debug(parts:list[Trimesh], settings:dict, queue: Queue):
     _, rewards = buffer.get_valid_env_inds(env)
 
     if queue is not None:
-        data = buffer.get_current_states_for_rendering(env.num_rollouts)
+        data = buffer.get_current_states_for_rendering(settings["training"]["num_render_debug"])
         queue.put(data)
 
 
 if __name__ == "__main__":
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR, set_default
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings
     import torch
     from learn2assemble.render import render_batch_simulation
     from learn2assemble import ASSEMBLY_RESOURCE_DIR
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
-
-    settings = {
-        "contact_settings": {
-            "shrink_ratio": 0.0,
-        },
-        "env": {
-            "n_robot": 2,
-            "boundary_part_ids": [0],
-            "sim_buffer_size": 128,
-            "num_rollouts": 4*4,
-            "verbose": True,
-        },
-        "rbe": {
-            "density": 1E4,
-            "mu": 0.55,
-            "velocity_tol": 1e-2,
-            "verbose": False,
-        },
-        "admm": {
-            "Ccp": 1E6,
-            "evaluate_it": 100,
-            "max_iter": 1000,
-            "float_type": torch.float32,
-        }
-    }
-
+    default_settings["rbe"]["density"] = 1E4
     queue = Queue()
-    p1 = Process(target=env_debug, args=(parts, settings, queue))
-    p2 = Process(target=render_batch_simulation, args=(parts, settings["env"]["boundary_part_ids"], queue))
+    p1 = Process(target=env_debug, args=(parts, default_settings, queue))
+    p2 = Process(target=render_batch_simulation, args=(parts, default_settings["env"]["boundary_part_ids"], queue))
     p2.start()
     p1.start()
     p1.join()

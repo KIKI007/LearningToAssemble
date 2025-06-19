@@ -232,25 +232,3 @@ def draw_pygdata(PyGdata: HeteroData, k = 1, iter = 10000):
     nx.draw_networkx_edges(graph, pos, edge_color=edge_colors, arrows=True)
 
     plt.show()
-
-if __name__ == "__main__":
-    from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR
-    from learn2assemble.render import draw_assembly_batches, init_polyscope
-    import polyscope as ps
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
-    contacts = compute_assembly_contacts(parts)
-
-    #graph_constructor = GFTFGraphConstructor(parts, contacts)
-
-    init_polyscope()
-    batch_part_states = np.random.randint(low = 0, high=3, size = (512, len(parts)), dtype=np.int32)
-    batch_stability = np.random.randint(low = -1, high=2, size = (512), dtype=np.int32)
-    draw_assembly_batches(parts, batch_part_states, batch_stability, scale=2)
-    batch_part_states = torch.tensor(batch_part_states, dtype=torch.int32, device=device)
-    #start = time.perf_counter()
-    #graphs = graph_constructor.graphs(part_states)
-    #end = time.perf_counter()
-    #print(end - start)
-    ps.show()
-    #draw_pygdata(graphs[0], iter = 500)

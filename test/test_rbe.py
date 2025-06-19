@@ -1,6 +1,6 @@
 import numpy as np
 
-from learn2assemble.RBE import *
+from learn2assemble.rbe import *
 from learn2assemble.assembly import *
 import os
 

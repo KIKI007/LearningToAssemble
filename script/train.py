@@ -47,7 +47,8 @@ if __name__ == "__main__":
     if args.wandb:
         wandb.login(key = args.wandb, relogin = True, force = True)
         run = wandb.init(project="Disassembly_train", name = name)
-
+    else:
+        run = None
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + f"/{name}")
     contacts = compute_assembly_contacts(parts, default_settings)
     train(parts, contacts, default_settings, run)

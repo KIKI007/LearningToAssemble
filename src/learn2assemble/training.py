@@ -155,8 +155,7 @@ def train(parts: list[Trimesh],
     ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
 
     print(f"Start training, curriculum: {env.curriculum.shape[0]}")
-    ppo_agent.print_iter = 0
-    print_epoch = training_settings.print_epochs
+    save_epochs = training_settings.save_epochs
 
     # training
     while ppo_agent.episode <= training_settings.max_train_epochs:
@@ -178,10 +177,7 @@ def train(parts: list[Trimesh],
         # save policy
         accuracy_of_sample_curriculum = (torch.sum(rewards > 0) / rewards.shape[0]).item()
         accuracy_of_entire_curriculum = None
-        if (
-                accuracy_of_sample_curriculum > ppo_agent.accuracy_of_sample_curriculum + training_settings.save_delta_accuracy
-                and not sample_new_curriculum):
-            ppo_agent.accuracy_of_sample_curriculum = accuracy_of_sample_curriculum
+        if (ppo_agent.episode + 1) % save_epochs == 0:
             accuracy_of_entire_curriculum = compute_accuracy(env, ppo_agent.policy_old.state_dict(), settings, None)
             if accuracy_of_entire_curriculum > ppo_agent.accuracy_of_entire_curriculum:
                 ppo_agent.accuracy_of_entire_curriculum = accuracy_of_entire_curriculum

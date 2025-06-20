@@ -78,7 +78,7 @@ def compute_accuracy(env, state_dict, settings, queue):
                                                 ppo_agent.buffer.curriculum_inds,
                                                 SimpleNamespace(**settings["training"]),
                                                 queue)
-    return torch.sum(ppo_agent.buffer.rewards > 0).item() / env.curriculum.shape[0]
+    return torch.sum(ppo_agent.buffer.rewards > 0).item() / ppo_agent.buffer.curriculum_inds.shape[0]
 
 
 def evaluation(parts: list[Trimesh],

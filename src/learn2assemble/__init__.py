@@ -26,7 +26,6 @@ default_settings = settings = {
         "num_rollouts": 1024,
         "verbose": False,
         "seed": 0,
-        "verbose": False,
     },
     "rbe": {
         "nt": 8,

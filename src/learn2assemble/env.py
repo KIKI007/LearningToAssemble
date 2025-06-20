@@ -16,14 +16,20 @@ class Timer:
         self.timer_dict = {}
         self.accumulator = {}
 
+    def __call__(self, name):
+        if name in self.accumulator:
+            return self.accumulator[name]
+        else:
+            return 0.0
+
     def start(self, name):
         self.timer_dict[name] = perf_counter()
 
-    def stop(self, name, accumulate=False):
+    def stop(self, name):
         if name not in self.timer_dict:
             self.timer_dict[name] = perf_counter()
         elapse = perf_counter() - self.timer_dict[name]
-        if accumulate and name in self.accumulator:
+        if name in self.accumulator:
             self.accumulator[name] += elapse
         else:
             self.accumulator[name] = elapse
@@ -110,7 +116,7 @@ class DisassemblyEnv:
             self.timer.start("simulation")
             part_states = np.vstack(self.sim_buffer[:num_to_sim])
             _, stable_flag = learn2assemble.simulator.simulate(self.parts, self.contacts, part_states, self.settings)
-            elapse, _ = self.timer.stop("simulation", True)
+            elapse, _ = self.timer.stop("simulation")
             if self.verbose:
                 print(f"num_sim {part_states.shape[0]}, \t avg_sim {round(elapse / part_states.shape[0], 4)}")
 
@@ -139,7 +145,7 @@ class DisassemblyEnv:
         for ind, part_state in enumerate(part_states):
             state_encode = tuple(part_state.tolist())
             self.stability_history[state_encode] = stable_flag[ind]
-        self.timer.stop("history", True)
+        self.timer.stop("history")
 
     def get_history(self, part_state):
         state_encode = tuple(part_state.tolist())
@@ -154,7 +160,7 @@ class DisassemblyEnv:
             state_encode = tuple(part_state.tolist())
             if actions[ind] >= self.n_part and state_encode not in self.stability_history:
                 self.sim_buffer.append(part_state)  # add state into simulation buffer
-        self.timer.stop("history", True)
+        self.timer.stop("history")
 
         self.simulate_buffer()
 
@@ -165,7 +171,7 @@ class DisassemblyEnv:
                 results.append(1)  # stability = 1 for held actions
             else:
                 results.append(self.get_history(part_state))
-        self.timer.stop("history", True)
+        self.timer.stop("history")
         return np.array(results, dtype=np.int32)
 
     def action_masks(self, part_states: np.ndarray):

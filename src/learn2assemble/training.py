@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import torch
 from pathlib import Path
-import polyscope as ps
 import torch_geometric
 
 from learn2assemble import update_default_settings
@@ -17,6 +16,8 @@ from trimesh import Trimesh
 import numpy as np
 import time
 from multiprocessing import Queue
+
+import wandb
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
@@ -122,7 +123,7 @@ def evaluation(parts: list[Trimesh],
 def train(parts: list[Trimesh],
           contacts: dict,
           settings: dict,
-          queue: Queue = None):
+          wandb = None):
     training_settings = update_default_settings(settings,
                                     "training", {
                                         "max_train_epochs": 50000,
@@ -163,7 +164,7 @@ def train(parts: list[Trimesh],
         # the first several run is to visit all curriculum
         curriculum_inds, sample_new_curriculum = ppo_agent.buffer.sample_curriculum(env.num_rollouts)
         ppo_agent.buffer.curriculum_inds = curriculum_inds
-        rewards = ppo_agent.buffer.rewards = training_rollout(ppo_agent, env, curriculum_inds, training_settings, queue)
+        rewards = ppo_agent.buffer.rewards = training_rollout(ppo_agent, env, curriculum_inds, training_settings, None)
 
         # update entropy weights
         inds = curriculum_inds.to(device)
@@ -180,7 +181,7 @@ def train(parts: list[Trimesh],
                 accuracy_of_sample_curriculum > ppo_agent.accuracy_of_sample_curriculum + training_settings.save_delta_accuracy
                 and not sample_new_curriculum):
             ppo_agent.accuracy_of_sample_curriculum = accuracy_of_sample_curriculum
-            accuracy_of_entire_curriculum = compute_accuracy(env, ppo_agent.policy_old.state_dict(), settings, queue)
+            accuracy_of_entire_curriculum = compute_accuracy(env, ppo_agent.policy_old.state_dict(), settings, None)
             if accuracy_of_entire_curriculum > ppo_agent.accuracy_of_entire_curriculum:
                 ppo_agent.accuracy_of_entire_curriculum = accuracy_of_entire_curriculum
                 ppo_agent.save(saved_model_path, settings, env.curriculum, env.stability_history)
@@ -191,14 +192,30 @@ def train(parts: list[Trimesh],
             update_iter=training_settings.K_epochs)
 
         # print status
-        elaspe = time.perf_counter() - ppo_agent.episode_timer
+        episode_time = time.perf_counter() - ppo_agent.episode_timer
         print("")
         print("Episode : {} \t\t Accuracy : {:.2f}\t\t Time : {:.2f}".format(ppo_agent.episode,
-                                                                             accuracy_of_sample_curriculum, elaspe))
+                                                                             accuracy_of_sample_curriculum, episode_time))
         print("Loss : {:.2e} \t\t Sur: {:.2e} \t\t Val: {:.2e} \t\t Entropy : {:.2e}".format(loss, sur_loss, val_loss,
                                                                                              entropy))
+
+        if wandb is not None:
+            wandb.log({"episode_time": episode_time,
+                       "update_time": ppo_agent.timer("update"),
+                       "inference_time": ppo_agent.timer("inference"),
+                       "graph_time": ppo_agent.timer("graph"),
+                       "sim_time": env.timer("simulation"),
+                       "history_time": env.timer("history"),
+                       "accuracy_sampled": accuracy_of_sample_curriculum,
+                       "loss": loss,
+                       "entropy": entropy,
+                       "value loss": val_loss,
+                       "surrogate loss": sur_loss, }, step=ppo_agent.episode)
+
         if accuracy_of_entire_curriculum is not None:
             print(f"Saved! accuracy of entire curriculum:\t", accuracy_of_entire_curriculum)
+            if wandb is not None:
+                wandb.log({"accuracy_curriculum": accuracy_of_entire_curriculum}, step=ppo_agent.episode)
             if accuracy_of_entire_curriculum > training_settings.accuracy_terminate_threshold:
                 break
         ppo_agent.episode = ppo_agent.episode + 1

@@ -83,16 +83,19 @@ class PPO:
                       masks: np.ndarray,
                       env_inds: np.ndarray):
         # build graphs
+        self.timer.start("graph")
         masks = torch.tensor(masks, dtype=floatType, device=device)
         graphs = self.graph_constructor.graphs(part_states)
-
         # to batch graphs
         batch_graph = torch_geometric.data.Batch.from_data_list(graphs).to(device)
+        self.timer.stop("graph")
 
+        self.timer.start("inference")
         # inference
         self.policy_old.eval()
         with torch.no_grad():
             action, action_logprob, state_val = self.policy_old.act(batch_graph, masks, self.deterministic)
+        self.timer.stop("inference")
 
         # add to buffer
         namelist = ['states', 'actions', 'logprobs', "state_values", "masks"]
@@ -104,8 +107,10 @@ class PPO:
 
     def update_policy(self, batch_size=None, update_iter=5):
 
+        self.timer.start("graph")
         # extract training dataset from buffer
         dataset = self.buffer.build_dataset(batch_size=batch_size)
+        self.timer.stop("graph")
 
         # record
         loss = []
@@ -114,6 +119,7 @@ class PPO:
         self.policy.train(True)
         self.optimizer = torch.optim.Adam([self.optimizer_params])
 
+        self.timer.start("update")
         for epoch_index in range(update_iter):
             sur_loss = 0
             val_loss = 0
@@ -131,6 +137,7 @@ class PPO:
                     loss += loss_batch
                     entropy += entropy_batch
             self.optimizer.step()
+        self.timer.stop("update")
 
         sampled, n = torch.unique(dataset.curriculum_id.to(device), return_counts=True)
         self.buffer.curriculum_cumsurloss[sampled] /= (n * update_iter)

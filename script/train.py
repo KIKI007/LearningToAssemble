@@ -3,7 +3,7 @@ from learn2assemble.assembly import load_assembly_from_files, compute_assembly_c
 from learn2assemble.training import train, evaluation
 import argparse
 import torch
-
+import wandb
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Learning to assemble with alternative plans')
@@ -11,6 +11,7 @@ if __name__ == "__main__":
     parser.add_argument('--robot', type=int, default=2, help='The number of robots')
     parser.add_argument('--output', type=str, default=None, help='The name of policy output')
     parser.add_argument('--curriculum', type=int, default=64, help='The beam search width for generating curriculum')
+    parser.add_argument('--wandb', type=str, default=None, help='Activate WanDB')
 
     args = parser.parse_args()
     name = args.name
@@ -43,6 +44,10 @@ if __name__ == "__main__":
         default_settings["training"]["policy_update_batch_size"] = 4096
         default_settings["env"]["num_rollouts"] = 2048
 
+    if args.wandb:
+        wandb.login(key = args.wandb, relogin = True, force = True)
+        run = wandb.init(project="Disassembly_train", name = name)
+
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + f"/{name}")
     contacts = compute_assembly_contacts(parts, default_settings)
-    train(parts, contacts, default_settings, None)
+    train(parts, contacts, default_settings, run)

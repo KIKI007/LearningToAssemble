@@ -71,7 +71,8 @@ def compute_accuracy(env, state_dict, settings, queue):
     ppo_agent.policy.load_state_dict(state_dict)
     ppo_agent.deterministic = True
     ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
-    ppo_agent.buffer.curriculum_inds = np.arange(env.curriculum.shape[0])
+    num_of_sample = min(env.num_rollouts, env.curriculum.shape[0])
+    ppo_agent.buffer.curriculum_inds = np.random.choice(env.curriculum.shape[0], size=num_of_sample, replace=False)
     ppo_agent.buffer.rewards = training_rollout(ppo_agent,
                                                 env,
                                                 ppo_agent.buffer.curriculum_inds,

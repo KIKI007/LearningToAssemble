@@ -71,7 +71,7 @@ default_settings = settings = {
     },
     "training": {
         "max_train_epochs": 5000,
-        "save_epochs": 10,
+        "save_epochs": 5,
         "policy_update_batch_size": 4096,
         "K_epochs": 5,
         "policy_name": "example",

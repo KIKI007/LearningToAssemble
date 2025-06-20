@@ -40,9 +40,9 @@ if __name__ == "__main__":
     elif memory_GB < 48:
         default_settings["training"]["policy_update_batch_size"] = 2048
         default_settings["env"]["num_rollouts"] = 1024
-    else:
+    elif memory_GB > 75:
         default_settings["training"]["policy_update_batch_size"] = 4096
-        default_settings["env"]["num_rollouts"] = 2048
+        default_settings["env"]["num_rollouts"] = 1024
 
     if args.wandb:
         wandb.login(key = args.wandb, relogin = True, force = True)

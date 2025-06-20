@@ -74,7 +74,7 @@ default_settings = settings = {
         "save_delta_accuracy": 0.01,
         "print_epochs": 1,
         "policy_update_batch_size": 4096,
-        "K_epochs": 10,
+        "K_epochs": 5,
         "policy_name": "example",
         "accuracy_terminate_threshold": 0.98,
         "num_render_debug": 4 * 4,

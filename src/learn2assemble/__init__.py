@@ -70,9 +70,8 @@ default_settings = settings = {
         "per_num_anneal": 500,
     },
     "training": {
-        "max_train_epochs": 1000,
-        "save_delta_accuracy": 0.01,
-        "print_epochs": 1,
+        "max_train_epochs": 5000,
+        "save_epochs": 5,
         "policy_update_batch_size": 4096,
         "K_epochs": 5,
         "policy_name": "example",

@@ -17,22 +17,22 @@ if __name__ == "__main__":
     name = args.name
     default_settings["n_robot"] = args.robot
     default_settings["curriculum"]["n_beam"] = args.curriculum
+    default_settings["training"]["policy_name"] = name
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + f"/{name}")
 
-    output_name = args.output
-    if output_name is None:
-        default_settings["training"]["policy_name"] = name
-    else:
-        default_settings["training"]["policy_name"] = output_name
+    if args.output is not None:
+        default_settings["training"]["policy_name"] = args.output
 
-    default_settings["env"]["boundary_part_ids"] = [0]
-    default_settings["training"]["terminate_determinstic_accuracy"] = 0.98
-    if "tetris" in name:
-        default_settings["rbe"]["density"] = 1E2
-        default_settings["rbe"]["max_iter"] = 1000
-        default_settings["training"]["terminate_nondeterminstic_accuracy"] = 0.9
-    elif "rulin" in name:
+    if "rulin" in name:
         default_settings["rbe"]["density"] = 1E4
-        default_settings["training"]["terminate_nondeterminstic_accuracy"] = 0.85
+    elif "mario" in name:
+        default_settings["rbe"]["density"] = 1E4
+        default_settings["rbe"]["max_iter"] = 3000
+        default_settings["env"]["boundary_part_ids"] = [0, 12, 59, 14, 2, 41, 5, 6, 7, 10, 17, 1, 13, 58, 9, 15, 38]
+    elif "dome" in name:
+        default_settings["rbe"]["density"] = 1E3
+        default_settings["rbe"]["max_iter"] = 3000
+        default_settings["env"]["boundary_part_ids"] = [len(parts) - 1]
 
     memory_GB = torch.cuda.get_device_properties(0).total_memory / 1024 / 1024 / 1024
     if memory_GB < 24:
@@ -50,6 +50,7 @@ if __name__ == "__main__":
         run = wandb.init(project="Disassembly_train", name = name)
     else:
         run = None
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + f"/{name}")
+
     contacts = compute_assembly_contacts(parts, default_settings)
     train(parts, contacts, default_settings, run)
+    evaluation(parts, contacts, default_settings["training"]["policy_name"], 0, None)

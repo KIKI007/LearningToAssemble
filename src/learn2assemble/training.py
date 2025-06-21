@@ -64,12 +64,12 @@ def training_rollout(ppo_agent: PPO,
     return torch.tensor(rewards, dtype=floatType)
 
 
-def compute_accuracy(env, state_dict, settings, queue):
+def compute_accuracy(env, state_dict, settings, deterministic: bool = True, queue = None):
 
     ppo_agent = PPO(env.parts, env.contacts, settings)
     ppo_agent.policy_old.load_state_dict(state_dict)
     ppo_agent.policy.load_state_dict(state_dict)
-    ppo_agent.deterministic = True
+    ppo_agent.deterministic = deterministic
     ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
     num_of_sample = min(env.num_rollouts, env.curriculum.shape[0])
     ppo_agent.buffer.curriculum_inds = np.random.choice(env.curriculum.shape[0], size=num_of_sample, replace=False)
@@ -103,6 +103,7 @@ def evaluation(parts: list[Trimesh],
     if curriculum is None:
         _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
     env.set_curriculum(curriculum)
+    env.num_rollouts = env.curriculum.shape[0]
     accuracy = compute_accuracy(env, state_dict, settings, queue)
     print(f"Train Size:\t {env.curriculum.shape[0]}", "\t\t", "Accuracy:\t", accuracy)
 
@@ -116,6 +117,7 @@ def evaluation(parts: list[Trimesh],
             new_curriculum.append(part_state)
     new_curriculum = np.vstack(new_curriculum)
     env.set_curriculum(curriculum)
+    env.num_rollouts = env.curriculum.shape[0]
     env.stability_history = stability_history
     accuracy = compute_accuracy(env, state_dict, settings, queue)
     print(f"Test Size:\t {env.curriculum.shape[0]}", "\t\t", "Accuracy:\t", accuracy)

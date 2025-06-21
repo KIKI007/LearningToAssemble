@@ -91,20 +91,20 @@ def evaluation(parts: list[Trimesh],
         agent = pickle.load(handle)
         state_dict = agent['state_dict']
         settings = agent['settings']
-        curriculum = agent.get('curriculum', None)
-        stability_history = agent.get('stability_history', {})
 
     settings['training']['num_render_debug'] = num_render_debug
+    settings["rbe"]["pre-computed"] = False
+    settings["admm"]["pre-computed"] = False
 
     env = DisassemblyEnv(parts, contacts, settings=settings)
 
     # single forward curriculum (training)
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
-    if curriculum is None:
-        _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
+    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
     env.set_curriculum(curriculum)
     env.num_rollouts = env.curriculum.shape[0]
-    accuracy = compute_accuracy(env, state_dict, settings, queue)
+    accuracy = compute_accuracy(env, state_dict, settings, True, queue)
+
     print(f"Train Size:\t {env.curriculum.shape[0]}", "\t\t", "Accuracy:\t", accuracy)
 
     # double forward curriculum (testing)
@@ -118,8 +118,7 @@ def evaluation(parts: list[Trimesh],
     new_curriculum = np.vstack(new_curriculum)
     env.set_curriculum(curriculum)
     env.num_rollouts = env.curriculum.shape[0]
-    env.stability_history = stability_history
-    accuracy = compute_accuracy(env, state_dict, settings, queue)
+    accuracy = compute_accuracy(env, state_dict, settings, True, queue)
     print(f"Test Size:\t {env.curriculum.shape[0]}", "\t\t", "Accuracy:\t", accuracy)
 
 
@@ -159,9 +158,9 @@ def train(parts: list[Trimesh],
     print(f"Start training, curriculum: {env.curriculum.shape[0]}")
     save_epochs = training_settings.save_epochs
 
+    ppo_agent.episode_timer = time.perf_counter()
     # training
     while ppo_agent.episode <= training_settings.max_train_epochs:
-        ppo_agent.episode_timer = time.perf_counter()
 
         # the first several run is to visit all curriculum
         curriculum_inds, sample_new_curriculum = ppo_agent.buffer.sample_curriculum(env.num_rollouts)
@@ -179,11 +178,21 @@ def train(parts: list[Trimesh],
         # save policy
         accuracy_of_sample_curriculum = (torch.sum(rewards > 0) / rewards.shape[0]).item()
         accuracy_of_entire_curriculum = None
-        if (ppo_agent.episode + 1) % save_epochs == 0:
-            accuracy_of_entire_curriculum = compute_accuracy(env, ppo_agent.policy_old.state_dict(), settings, None)
+        if (ppo_agent.episode + 1) % save_epochs == 0 and not sample_new_curriculum:
+
+            accuracy_of_entire_curriculum = compute_accuracy(env, ppo_agent.policy_old.state_dict(), settings, False, None)
+            accuracy_of_entire_curriculum_determinstic = compute_accuracy(env, ppo_agent.policy_old.state_dict(), settings, True, None)
+
+            # wandb output
+            if wandb is not None:
+                wandb.log({"acc. nondeter.": accuracy_of_entire_curriculum}, step=ppo_agent.episode)
+                wandb.log({"acc. deter.": accuracy_of_entire_curriculum_determinstic}, step=ppo_agent.episode)
+
+            # save
             if accuracy_of_entire_curriculum > ppo_agent.accuracy_of_entire_curriculum:
                 ppo_agent.accuracy_of_entire_curriculum = accuracy_of_entire_curriculum
-                ppo_agent.save(saved_model_path, settings, env.curriculum, env.stability_history)
+                ppo_agent.save(saved_model_path, settings)
+
 
         # policy update
         loss, sur_loss, val_loss, entropy = ppo_agent.update_policy(
@@ -212,9 +221,10 @@ def train(parts: list[Trimesh],
                        "surrogate loss": sur_loss, }, step=ppo_agent.episode)
 
         if accuracy_of_entire_curriculum is not None:
-            print(f"Saved! accuracy of entire curriculum:\t", accuracy_of_entire_curriculum)
-            if wandb is not None:
-                wandb.log({"accuracy_curriculum": accuracy_of_entire_curriculum}, step=ppo_agent.episode)
-            if accuracy_of_entire_curriculum > training_settings.accuracy_terminate_threshold:
+            print("Non-deter. Acc:\t {:.2f}, \t\t Deter. Acc:\t {:.2f}".format(accuracy_of_entire_curriculum, accuracy_of_entire_curriculum_determinstic))
+
+            # exit
+            if  accuracy_of_entire_curriculum > training_settings.terminate_nondeterminstic_accuracy\
+            and accuracy_of_entire_curriculum_determinstic > training_settings.terminate_determinstic_accuracy:
                 break
         ppo_agent.episode = ppo_agent.episode + 1

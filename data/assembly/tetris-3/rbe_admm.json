@@ -1,0 +1,14 @@
+{
+  "mu": 0.55,
+  "qtol" : 1E-2,
+  "rho" : 1E2,
+  "nt" : 8,
+  "eps_conv" : 1E-7,
+  "evaluate_iter": 100,
+  "alpha": 1.6,
+  "ub": 0.5,
+  "Ccp" : 1E5,
+  "max_admm_iter": 2000,
+  "max_qp_iter": 2,
+  "rs": [0.1]
+}

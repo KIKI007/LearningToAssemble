@@ -202,10 +202,8 @@ class PPO:
                 batch_percentage * value_loss.mean().item(),
                 batch_percentage * entropy_mean)
 
-    def save(self, checkpoint_path, settings, curriculum, stability_history):
+    def save(self, checkpoint_path, settings):
         d = {'settings': settings,
-             'state_dict': self.policy_old.state_dict(),
-             "curriculum": curriculum,
-             "stability_history": stability_history,}
+             'state_dict': self.policy_old.state_dict()}
         with open(checkpoint_path, 'wb') as handle:
             pickle.dump(d, handle, protocol=pickle.HIGHEST_PROTOCOL)

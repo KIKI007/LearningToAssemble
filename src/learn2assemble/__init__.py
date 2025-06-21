@@ -75,7 +75,8 @@ default_settings = settings = {
         "policy_update_batch_size": 4096,
         "K_epochs": 5,
         "policy_name": "example",
-        "accuracy_terminate_threshold": 0.98,
+        "terminate_nondeterminstic_accuracy": 0.9,
+        "terminate_determinstic_accuracy": 0.98,
         "num_render_debug": 4 * 4,
     }
 }

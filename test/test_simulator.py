@@ -5,7 +5,8 @@ from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings
 
 
 def init_dome_env(n_batch, n_remove):
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
+    name = "dome"
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + f"/{name}")
     default_settings["rbe"]["density"] = 1E3
     default_settings["admm"]["max_iter"] = 3000
     default_settings["env"]["boundary_part_ids"] = [len(parts) - 1]
@@ -15,7 +16,10 @@ def init_dome_env(n_batch, n_remove):
     for batch_id in range(n_batch):
         remove_part_ids = np.random.choice(len(parts), n_remove, replace=False)
         part_states[batch_id, remove_part_ids] = 0
-    part_states[:, -1] = 2
+    if name == "dome":
+        part_states[:, -1] = 2
+    else:
+        part_states[:, 0] = 2
     contacts = compute_assembly_contacts(parts, default_settings)
     return parts, contacts, part_states, default_settings
 

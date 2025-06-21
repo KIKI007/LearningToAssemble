@@ -24,14 +24,15 @@ if __name__ == "__main__":
     else:
         default_settings["training"]["policy_name"] = output_name
 
+    default_settings["env"]["boundary_part_ids"] = [0]
+    default_settings["training"]["terminate_determinstic_accuracy"] = 0.98
     if "tetris" in name:
         default_settings["rbe"]["density"] = 1E2
         default_settings["rbe"]["max_iter"] = 1000
-        default_settings["env"]["boundary_part_ids"] = [0]
+        default_settings["training"]["terminate_nondeterminstic_accuracy"] = 0.9
     elif "rulin" in name:
         default_settings["rbe"]["density"] = 1E4
-        default_settings["rbe"]["max_iter"] = 1000
-        default_settings["env"]["boundary_part_ids"] = [0]
+        default_settings["training"]["terminate_nondeterminstic_accuracy"] = 0.85
 
     memory_GB = torch.cuda.get_device_properties(0).total_memory / 1024 / 1024 / 1024
     if memory_GB < 24:

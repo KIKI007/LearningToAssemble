@@ -2,15 +2,20 @@
 Learning to Assemble with Alternative Plans (SIGGRAPH 2025)
 
 ## Prerequisites
-1. Pytorch 2.4.0 + Cuda 12.4 (currently because of PyG)
+1. uv package manager
 2. Gurobi License (optional)
 
 ## Installation
-In the project folder
+1. In the project folder, create a python virtual environment
 ```bash
-pip install -e .
+uv venv --python=3.10
 ```
-Then, to verify the code
+2. Activate the environment
+3. Install the required packages
+```bash
+uv pip install -e .
+```
+4. Verify the test code
 ```bash
 pytest .
 ```

@@ -79,9 +79,10 @@ class RolloutBuffer:
 
     def modify_entropy(self):
         who_failed = self.num_failed > 0
-        increasable = self.entropy_weights[who_failed] < self.max_entropy_weight
-        self.entropy_weights[self.num_failed[increasable]] += self.entropy_weight_increase
-        self.entropy_weights[self.num_success] = self.base_entropy_weight
+        who_success = self.num_success > 0
+        self.entropy_weights[who_failed] = self.entropy_weights[who_failed] + self.entropy_weight_increase
+        self.entropy_weights[who_failed] = torch.clamp(self.entropy_weights[who_failed], min = 0, max = self.max_entropy_weight)
+        self.entropy_weights[who_success] = self.base_entropy_weight
 
     def reset_curriculum(self, n_curriculums):
         self.num_failed = torch.zeros(n_curriculums, dtype=intType, device=device)
@@ -114,7 +115,7 @@ class RolloutBuffer:
     def sample_curriculum(self, num_rollouts):
         visited = self.curriculum_visited
         rank = self.curriculum_rank
-        sample_new_curriculum = (visited == False).sum() > num_rollouts
+        sample_new_curriculum = (visited == False).sum() > 0
         if sample_new_curriculum:
             sample_weights = torch.zeros_like(visited).to(floatType)
             sample_weights[visited == False] = 1.0 / (visited == False).sum()

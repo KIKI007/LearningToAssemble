@@ -78,7 +78,8 @@ class RolloutBuffer:
             self.per_beta += self.per_beta_increase
 
     def modify_entropy(self):
-        increasable = self.entropy_weights[self.num_failed] < self.max_entropy_weight
+        who_failed = self.num_failed > 0
+        increasable = self.entropy_weights[who_failed] < self.max_entropy_weight
         self.entropy_weights[self.num_failed[increasable]] += self.entropy_weight_increase
         self.entropy_weights[self.num_success] = self.base_entropy_weight
 

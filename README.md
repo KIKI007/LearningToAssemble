@@ -1,10 +1,6 @@
 # LearningToAssemble
 Learning to Assemble with Alternative Plans (SIGGRAPH 2025)
 
-## Prerequisites
-1. uv package manager
-2. Gurobi License (optional)
-
 ## Option 1. Installation using uv
 1. In the project folder, create a python virtual environment
 ```bash

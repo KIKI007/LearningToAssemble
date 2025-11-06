@@ -1,6 +1,5 @@
 FROM runpod/pytorch:1.0.2-cu1281-torch271-ubuntu2204
 RUN apt-get update
-RUN apt-get install -y git-lfs
 RUN git clone https://github.com/KIKI007/LearningToAssemble.git
 
 # cuda 
@@ -24,4 +23,4 @@ COPY start.sh /start.sh
 # Run script
 CMD ["/start.sh"]
 
-# python /LearningToAssemble/script/train --curriculum 64 --wandb 1c4a274de42ea0326b6ac75651a33f2b7cb2d217 tetris-1
+# python /LearningToAssemble/script/train.py --curriculum 64 --wandb 1c4a274de42ea0326b6ac75651a33f2b7cb2d217 tetris-1

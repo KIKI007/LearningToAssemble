@@ -74,15 +74,15 @@ export_env_vars() {
 start_jupyter() {
     if [[ $JUPYTER_PASSWORD ]]; then
         echo "Starting Jupyter Lab..."
-        mkdir -p /RoboFab && \
+        mkdir -p /LearningToAssemble && \
         cd / && \
-        nohup jupyter lab --allow-root --no-browser --port=8888 --ip=* --FileContentsManager.delete_to_trash=False --ServerApp.terminado_settings='{"shell_command":["/bin/bash"]}' --ServerApp.token=$JUPYTER_PASSWORD --ServerApp.allow_origin=* --ServerApp.preferred_dir=/RoboFab &> /jupyter.log &
+        nohup jupyter lab --allow-root --no-browser --port=8888 --ip=* --FileContentsManager.delete_to_trash=False --ServerApp.terminado_settings='{"shell_command":["/bin/bash"]}' --ServerApp.token=$JUPYTER_PASSWORD --ServerApp.allow_origin=* --ServerApp.preferred_dir=/LearningToAssemble &> /jupyter.log &
         echo "Jupyter Lab started"
     else
         echo "Starting Jupyter Lab (password token 123456)..."
-        mkdir -p /RoboFab && \
+        mkdir -p /LearningToAssemble && \
         cd / && \
-        nohup jupyter lab --allow-root --no-browser --port=8888 --ip="0.0.0.0" --FileContentsManager.delete_to_trash=False --ServerApp.terminado_settings='{"shell_command":["/bin/bash"]}' --ServerApp.allow_origin=* --ServerApp.token="123456" --ServerApp.preferred_dir=/RoboFab &> /jupyter.log &
+        nohup jupyter lab --allow-root --no-browser --port=8888 --ip="0.0.0.0" --FileContentsManager.delete_to_trash=False --ServerApp.terminado_settings='{"shell_command":["/bin/bash"]}' --ServerApp.allow_origin=* --ServerApp.token="123456" --ServerApp.preferred_dir=/LearningToAssemble &> /jupyter.log &
         echo "Jupyter Lab started"
     fi
 }

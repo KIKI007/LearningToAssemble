@@ -11,7 +11,7 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib"
 ENV TORCH_CUDA_ARCH_LIST="7.0+PTX"
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
 
-COPY pyproject.toml /LearningToAssemble/pyproject.toml
+# install learn2assemble
 WORKDIR "/LearningToAssemble"
 RUN pip install -e .
 WORKDIR "/"

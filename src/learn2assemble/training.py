@@ -125,6 +125,7 @@ def evaluation(parts: list[Trimesh],
 def train(parts: list[Trimesh],
           contacts: dict,
           settings: dict,
+          checkpoint : str = None,
           wandb = None):
     training_settings = update_default_settings(settings,
                                     "training", {
@@ -149,6 +150,16 @@ def train(parts: list[Trimesh],
     env = DisassemblyEnv(parts, contacts, settings=settings)
     ppo_agent = PPO(parts, contacts, settings)
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
+
+    # load existing policy
+    if checkpoint is not None:
+        pretrained_file = f"./models/{checkpoint}.pol"
+        with open(pretrained_file, 'rb') as handle:
+            agent = pickle.load(handle)
+            state_dict = agent['state_dict']
+            settings = agent['settings']
+            ppo_agent.policy.load_state_dict(state_dict)
+            ppo_agent.policy_old.load_state_dict(state_dict)
 
     # forward curriculum
     _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)

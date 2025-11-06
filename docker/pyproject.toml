@@ -5,19 +5,19 @@ authors = [
   { name="Ziqi Wang", email="ziqiw@ust.hk" },
 ]
 dependencies = [
-    "torch_geometric >= 2.7.0",
+    "wandb",
+    "torch_geometric == 2.7.0",
     "scipy==1.14.1",
-    'torch>=2.6.0',
-    "numpy == 1.26.4",
     'shapely',
     'gurobipy',
+    "numpy == 1.26.4",
     "polyscope",
     "trimesh",
     "python-fcl",
     "matplotlib",
-    "pytest",
-    "wandb",
+    "pytest"
 ]
+
 
 description = "A package for conducting research using robots for assembly"
 readme = "README.md"
@@ -39,16 +39,3 @@ build-backend = "hatchling.build"
 [project.urls]
 Homepage = "https://github.com/kiki007/LearningToAssemble"
 Issues = "https://github.com/kiki007/LearningToAssemble/issues"
-
-[[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
-explicit = true
-
-[tool.uv.sources]
-torch = [
-  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-torchvision = [
-  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]

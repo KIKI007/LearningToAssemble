@@ -1,0 +1,27 @@
+FROM runpod/pytorch:1.0.2-cu1281-torch271-ubuntu2204
+RUN apt-get update
+RUN apt-get install -y git-lfs
+RUN git clone https://github.com/KIKI007/LearningToAssemble.git
+
+# cuda 
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
+ENV PATH="${PATH}:/opt/hpcx/ompi/bin"
+ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/opt/hpcx/ompi/lib"
+ENV TORCH_CUDA_ARCH_LIST="7.0+PTX"
+ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+
+COPY pyproject.toml /LearningToAssemble/pyproject.toml
+WORKDIR "/LearningToAssemble"
+RUN pip install -e .
+WORKDIR "/"
+
+# MQTT
+RUN apt-get install -y mosquitto mosquitto-clients
+COPY mosquitto.conf /etc/mosquitto/mosquitto.conf
+COPY start.sh /start.sh
+
+# Run script
+CMD ["/start.sh"]
+
+# python /LearningToAssemble/script/train --curriculum 64 --wandb 1c4a274de42ea0326b6ac75651a33f2b7cb2d217 tetris-1

@@ -27,23 +27,23 @@ class PPO:
     def __init__(self, parts, contacts, settings):
         self.scheduler = None
         ppo_config = update_default_settings(settings,
-                                 "ppo",
+                                             "ppo",
                                              {
-                                     "gamma": 0.95,
-                                     "eps_clip": 0.2,
+                                                 "gamma": 0.95,
+                                                 "eps_clip": 0.2,
 
-                                     "base_entropy_weight": 0.005,
-                                     "entropy_weight_increase": 0.001,
-                                     "max_entropy_weight": 0.01,
+                                                 "base_entropy_weight": 0.005,
+                                                 "entropy_weight_increase": 0.001,
+                                                 "max_entropy_weight": 0.01,
 
-                                     "lr_milestones": [100, 300],
-                                     "lr_actor": 2e-3,
-                                     "betas_actor": [0.95, 0.999],
+                                                 "lr_milestones": [100, 300],
+                                                 "lr_actor": 2e-3,
+                                                 "betas_actor": [0.95, 0.999],
 
-                                     "per_alpha": 0.8,
-                                     "per_beta": 0.1,
-                                     "per_num_anneal": 500,
-                                 })
+                                                 "per_alpha": 0.8,
+                                                 "per_beta": 0.1,
+                                                 "per_num_anneal": 500,
+                                             })
         n_robot = settings["env"]["n_robot"]
         ppo_config = SimpleNamespace(**ppo_config)
         self.graph_constructor = GFTFGraphConstructor(parts, contacts)
@@ -110,6 +110,7 @@ class PPO:
         self.timer.start("graph")
         # extract training dataset from buffer
         dataset = self.buffer.build_dataset(batch_size=batch_size)
+
         self.timer.stop("graph")
 
         # record
@@ -125,18 +126,19 @@ class PPO:
             val_loss = 0
             loss = 0
             entropy = 0
-            self.optimizer.zero_grad()
+            dataset.randperm()
             for i, batch in enumerate(dataset):
+                self.optimizer.zero_grad()
                 if len(batch) > 0:
                     loss_batch, sur_loss_batch, val_loss_batch, entropy_batch = self.train_one_epoch(*batch,
                                                                                                      dataset.nstates,
                                                                                                      first_batch=(
-                                                                                                                 i == 0))
+                                                                                                             i == 0))
                     sur_loss += sur_loss_batch
                     val_loss += val_loss_batch
                     loss += loss_batch
                     entropy += entropy_batch
-            self.optimizer.step()
+                self.optimizer.step()
         self.timer.stop("update")
 
         sampled, n = torch.unique(dataset.curriculum_id.to(device), return_counts=True)
@@ -184,7 +186,7 @@ class PPO:
 
         # final loss of clipped objective PPO
         loss = (surrogate_loss * weights).mean() + 0.5 * (value_loss * weights).mean() - (
-                    entropy_weights * dist_entropy * weights).mean()
+                entropy_weights * dist_entropy * weights).mean()
         self.buffer.curriculum_visited[curriculum_id] = True
         self.buffer.curriculum_cumsurloss = self.buffer.curriculum_cumsurloss.scatter_reduce(0, curriculum_id,
                                                                                              torch.abs(

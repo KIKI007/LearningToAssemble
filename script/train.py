@@ -12,6 +12,7 @@ if __name__ == "__main__":
     parser.add_argument('--output', type=str, default=None, help='The name of policy output')
     parser.add_argument('--curriculum', type=int, default=64, help='The beam search width for generating curriculum')
     parser.add_argument('--wandb', type=str, default=None, help='Activate WanDB')
+    parser.add_argument('--checkpoint', type=str, default=None, help='Checkpoint file')
 
     args = parser.parse_args()
     name = args.name
@@ -52,5 +53,5 @@ if __name__ == "__main__":
         run = None
 
     contacts = compute_assembly_contacts(parts, default_settings)
-    train(parts, contacts, default_settings, run)
+    train(parts, contacts, default_settings, args.checkpoint, run)
     evaluation(parts, contacts, default_settings["training"]["policy_name"], 0, None)

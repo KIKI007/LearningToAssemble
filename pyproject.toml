@@ -5,18 +5,17 @@ authors = [
   { name="Ziqi Wang", email="ziqiw@ust.hk" },
 ]
 dependencies = [
-    "wandb",
-    "torch_geometric == 2.6.1",
+    "torch_geometric >= 2.7.0",
     "scipy==1.14.1",
+    "numpy == 1.26.4",
     'shapely',
     'gurobipy',
-    'torch == 12.4',
-    "numpy == 1.26.4",
     "polyscope",
     "trimesh",
     "python-fcl",
     "matplotlib",
-    "pytest"
+    "pytest",
+    "wandb",
 ]
 
 description = "A package for conducting research using robots for assembly"

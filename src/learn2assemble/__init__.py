@@ -1,8 +1,10 @@
 import os
 import torch
 import numpy as np
+
 RESOURCE_DIR = os.path.abspath(os.path.dirname(__file__) + "/../../data")
 ASSEMBLY_RESOURCE_DIR = os.path.abspath(os.path.dirname(__file__) + "/../../data/assembly")
+
 
 def get_gripper_spheres(open_widths: np.ndarray = None):
     import yaml
@@ -30,6 +32,7 @@ def get_gripper_spheres(open_widths: np.ndarray = None):
     sphere_centers[:, right_indices, 1] += open_widths[:, None]
     sphere_radius[:, hand_indices] += 0.008
     return sphere_centers, sphere_radius
+
 
 def update_default_settings(settings: dict,
                             name: str,
@@ -105,5 +108,21 @@ default_settings = settings = {
         "terminate_nondeterminstic_accuracy": 0.9,
         "terminate_determinstic_accuracy": 0.98,
         "num_render_debug": 4 * 4,
-    }
+    },
+    "grasp":
+        {
+            "n_sample": 1000,
+            "gripper_size": [0.02, 0.02, 0.08],
+            "check_ground": True,
+            "scale": 0.2,
+        },
+    "insertion":
+        {
+            "n_drt_sample": 1000,
+            "drt_length": 1,
+            "max_dist": 1,
+            "collision_eps": 0.01,
+            "type": "orthogonal",
+            "n_dt_sample": 10,
+        }
 }

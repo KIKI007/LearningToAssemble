@@ -13,8 +13,13 @@ if __name__ == "__main__":
     parser.add_argument('--policy', type=str, default=None, help='The name of the policy')
     parser.add_argument('--robot', type=int, default=2, help='The number of robots')
     parser.add_argument('--gui', action="store_true", help='Activate GUI')
+    parser.add_argument('--grasp', action="store_true", default=False, help='Check grasp')
+    parser.add_argument('--insertion', action="store_true", default=False, help='Check insertion')
 
     args = parser.parse_args()
+    check_grasp = int(args.grasp)
+    check_insertion = int(args.insertion)
+
     name = args.name
     gui = args.gui
     policy = args.policy
@@ -35,10 +40,11 @@ if __name__ == "__main__":
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + f"/{name}")
     contacts = compute_assembly_contacts(parts, default_settings)
     if not gui:
-        evaluation(parts, contacts, policy, 0, None)
+        evaluation(parts, contacts, policy, check_grasp, check_insertion, 0, None)
     else:
         queue = Queue()
-        p1 = Process(target=evaluation, args=(parts, contacts, policy, default_settings["training"]["num_render_debug"], queue))
+        num_render_debug = default_settings["training"]["num_render_debug"]
+        p1 = Process(target=evaluation, args=(parts, contacts, policy, check_grasp, check_insertion, num_render_debug, queue))
         p2 = Process(target=render_batch_simulation, args=(parts, default_settings["env"]["boundary_part_ids"], queue))
         p2.start()
         p1.start()

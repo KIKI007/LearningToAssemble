@@ -13,8 +13,8 @@ if __name__ == "__main__":
     parser.add_argument('--curriculum', type=int, default=64, help='The beam search width for generating curriculum')
     parser.add_argument('--wandb', type=str, default=None, help='Activate WanDB')
     parser.add_argument('--checkpoint', type=str, default=None, help='Checkpoint file')
-    parser.add_argument('--grasp', type=bool, default=False, help='Check grasp')
-    parser.add_argument('--insertion', type=bool, default=False, help='Check insertion')
+    parser.add_argument('--grasp', action="store_true", help='Check grasp')
+    parser.add_argument('--insertion', action="store_true", help='Check insertion')
 
     args = parser.parse_args()
     name = args.name
@@ -55,5 +55,5 @@ if __name__ == "__main__":
         run = None
 
     contacts = compute_assembly_contacts(parts, default_settings)
-    train(parts, contacts, default_settings,args.grasp, args.insertion, args.checkpoint, run)
-    evaluation(parts, contacts, default_settings["training"]["policy_name"], 0, None)
+    train(parts, contacts, default_settings, args.grasp, args.insertion, args.checkpoint, run)
+    evaluation(parts, contacts, default_settings["training"]["policy_name"], args.grasp, args.insertion, 0, None)

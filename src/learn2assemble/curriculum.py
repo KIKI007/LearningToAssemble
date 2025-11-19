@@ -228,74 +228,26 @@ def forward_curriculum(parts: list[Trimesh],
 if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
+    from learn2assemble.render import render_sequence, init_polyscope
+    import polyscope as ps
+    import polyscope.imgui as psim
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-7")
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     default_settings['curriculum']['verbose'] = True
     default_settings['rbe']['mu'] = 0.2
     default_settings["assembly"]["contact_shrink_ratio"] = 0.1 # for robustnessly computing the contact surfaces
     default_settings['curriculum']['n_beam'] = 64
 
     # debug
-    parts.remove(parts[3]) # for tetris-7
+    #parts.remove(parts[3]) # for tetris-7
 
     #
     contacts = compute_assembly_contacts(parts, default_settings)
     table_insertion, drts = compute_insertion_table(parts, default_settings)
-    table_grasp, grasp_frames, scaled_parts = compute_grasp_table(parts, default_settings)
+    table_grasp, grasp_frames, _ = compute_grasp_table(parts, default_settings)
     succeed, solution, curriculum = forward_curriculum(parts, contacts, table_insertion, table_grasp, default_settings)
     print("succeed:\t", succeed)
 
-    from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts, draw_assembly_motion, draw_gripper
-    import polyscope as ps
-    import polyscope.imgui as psim
-
-    step_id = 0
     init_polyscope()
-    draw_assembly(scaled_parts, solution[-1, :])
-
-    env = default_settings.get("env", {})
-    boundary_part_ids = env.get("boundary_part_ids", [])
-
-    t = 0
-    q = None
-    n_part = len(parts)
-
-    def interact():
-        global step_id, q, t, drts, table_insertion, table_grasp, n_part
-        changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=solution.shape[0] - 1)
-        current_state = solution[step_id, :]
-
-        if changed:
-            ps.remove_all_structures()
-            ps.remove_all_groups()
-            if step_id > 0:
-                prev_state = solution[step_id - 1, :]
-            else:
-                prev_state = np.zeros(len(parts))
-                prev_state[boundary_part_ids] = 2
-
-            held_state = (current_state == 2)
-            held_state[boundary_part_ids] = False
-            held_parts = held_state.nonzero()[0]
-            for robot_id, part_id in enumerate(held_parts):
-                frames = compute_grasp_frame(part_id, current_state, table_grasp, grasp_frames)
-                if frames is not None:
-                    draw_gripper(frames[0, :], 0.05, f"robot {robot_id}")
-            draw_assembly(scaled_parts, current_state)
-
-            to_install_part_id = np.logical_and(current_state == 2, prev_state != 2).nonzero()[0]
-            q = None
-            if to_install_part_id.shape[0] > 0:
-                to_install_part_id = to_install_part_id[0]
-                part_drts = compute_insertion_drt(to_install_part_id, current_state, table_insertion, drts)
-                if part_drts is not None:
-                    q = np.zeros(n_part * 6)
-                    q[6 * to_install_part_id: to_install_part_id * 6 + 3] = part_drts[0, :]
-
-        if q is not None:
-            changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
-            if changed:
-                draw_assembly_motion(scaled_parts, current_state, t * q)
-
-    ps.set_user_callback(interact)
+    render_sequence(parts, solution, default_settings)
     ps.show()

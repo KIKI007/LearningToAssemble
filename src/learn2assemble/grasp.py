@@ -7,6 +7,7 @@ import warp as wp
 import time
 from scipy.spatial.transform import Rotation
 
+
 @wp.kernel
 def sample_grasp_poses_kernel(mesh_id: wp.uint64,
                               face_ids: wp.array(dtype=wp.int32),
@@ -175,6 +176,7 @@ def evaluate_sphere_collisions_kernel(mesh_ids: wp.array(dtype=wp.uint64),
     if check_ground and sph[2] - wp_sph_radius[i, j] < 0.0:
         wp_sph_dists[i, j, k] = -1.0
 
+
 def check_grasp_collisions(wp_mesh_ids: wp.array(dtype=wp.uint64),
                            wp_frames: wp.array(dtype=wp.mat44f),
                            wp_open_widths: wp.array(dtype=wp.float32),
@@ -189,7 +191,7 @@ def check_grasp_collisions(wp_mesh_ids: wp.array(dtype=wp.uint64),
     wp_sph_dists = wp.zeros(shape=(num_of_samples, num_of_spheres, num_of_parts), dtype=wp.float32, device="cuda")
 
     wp.launch(evaluate_sphere_collisions_kernel,
-              dim= (num_of_samples, num_of_spheres, num_of_parts),
+              dim=(num_of_samples, num_of_spheres, num_of_parts),
               inputs=[wp_mesh_ids, wp_frames, wp_sph_centers, wp_sph_radius, wp_sph_dists, check_ground])
 
     sph_dists = wp_sph_dists.numpy()
@@ -197,22 +199,24 @@ def check_grasp_collisions(wp_mesh_ids: wp.array(dtype=wp.uint64),
     return flag
 
 
-def compute_grasp_table(parts: list[trimesh.Trimesh], settings: dict, scale = 0.2):
+def compute_grasp_table(parts: list[trimesh.Trimesh], settings: dict):
 
+    grasp_settings = update_default_settings(settings, "grasp",
+                            {
+                                "n_sample": 1000,
+                                "gripper_size": [0.02, 0.02, 0.08],
+                                "check_ground": True,
+                                "scale": 0.2,
+                            })
+
+    scale = grasp_settings["scale"]
     scaled_parts = [Trimesh(part.vertices, part.faces) for part in parts]
     for part in scaled_parts:
         part = part.apply_scale([scale, scale, scale])
 
-    update_default_settings(settings, "grasp",
-                            {
-                                "grasp_n_sample": 1000,
-                                "grasp_gripper_size": [0.02, 0.02, 0.08],
-                                "grasp_check_ground": True,
-                            })
-
-    pad_width, pad_height, gripper_width = settings["grasp"]["grasp_gripper_size"]
-    check_ground = settings["grasp"]["grasp_check_ground"]
-    num_of_samples = settings["grasp"]["grasp_n_sample"]
+    num_of_samples = grasp_settings["n_sample"]
+    check_ground = grasp_settings["check_ground"]
+    pad_width, pad_height, gripper_width = grasp_settings["gripper_size"]
 
     wp_parts = []
     wp_parts_id = []
@@ -234,7 +238,8 @@ def compute_grasp_table(parts: list[trimesh.Trimesh], settings: dict, scale = 0.
         wp_grasp_frames, wp_open_widths = sample_grasp_frames(part, wp_part_id, num_of_samples, gripper_width)
 
         # check finger contact
-        wp_grasp_frames, wp_open_widths = check_finger_contact(wp_part_id, wp_grasp_frames, wp_open_widths, pad_width, pad_height)
+        wp_grasp_frames, wp_open_widths = check_finger_contact(wp_part_id, wp_grasp_frames, wp_open_widths, pad_width,
+                                                               pad_height)
 
         # check pick collisions
         grasp_frames = wp_grasp_frames.numpy()
@@ -249,6 +254,7 @@ def compute_grasp_table(parts: list[trimesh.Trimesh], settings: dict, scale = 0.
         list_grasp_frames.append(grasp_frames)
 
     return table, list_grasp_frames, scaled_parts
+
 
 def check_graspability(current_states, boundary_part_ids, table):
     # check assemblability
@@ -266,20 +272,22 @@ def check_graspability(current_states, boundary_part_ids, table):
         flag = True
         for part_id in to_check_parts:
             new_table = table[part_id][:, exist_parts_flag[batch_id]]
-            flag = np.logical_and(flag, np.all(new_table, axis = -1).any())
+            flag = np.logical_and(flag, np.all(new_table, axis=-1).any())
         graspability_flag.append(flag)
     graspability_flag = np.array(graspability_flag)
-    #print("graspability time", time.perf_counter() - timer)
+    # print("graspability time", time.perf_counter() - timer)
     return graspability_flag
+
 
 def compute_grasp_frame(part_id, current_state, table, grasp_frames):
     exist_parts_flag = (current_state > 0)
     new_table = table[part_id][:, exist_parts_flag]
-    indices = new_table.all(axis = -1).nonzero()[0]
+    indices = new_table.all(axis=-1).nonzero()[0]
     if indices.shape[0] > 0:
         return grasp_frames[part_id][indices, :]
     else:
         return None
+
 
 if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings

@@ -85,6 +85,8 @@ def compute_accuracy(env, state_dict, settings, deterministic: bool = True, queu
 def evaluation(parts: list[Trimesh],
                contacts: dict,
                policy_name: str,
+               check_grasp: bool = False,
+               check_insertion: bool = False,
                num_render_debug: int = 4 * 4,
                queue: Queue = None):
     pretrained_file = f"./models/{policy_name}.pol"
@@ -98,6 +100,10 @@ def evaluation(parts: list[Trimesh],
     settings["admm"]["pre-computed"] = False
 
     env = DisassemblyEnv(parts, contacts, settings=settings)
+    if check_grasp:
+        env.table_grasp, env.grasp_frames, env.scaled_parts = compute_grasp_table(parts, settings)
+    if check_insertion:
+        env.table_insertion, env.drts = compute_insertion_table(parts, settings)
 
     # single forward curriculum (training)
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
@@ -126,7 +132,7 @@ def evaluation(parts: list[Trimesh],
 def train(parts: list[Trimesh],
           contacts: dict,
           settings: dict,
-          check_gasp: bool = False,
+          check_grasp: bool = False,
           check_insertion: bool = False,
           checkpoint : str = None,
           wandb = None):
@@ -152,7 +158,7 @@ def train(parts: list[Trimesh],
 
     # create env and ppo
     env = DisassemblyEnv(parts, contacts, settings=settings)
-    if check_gasp:
+    if check_grasp:
         env.table_grasp, env.grasp_frames, env.scaled_parts = compute_grasp_table(parts, settings)
     if check_insertion:
         env.table_insertion, env.drts = compute_insertion_table(parts, settings)

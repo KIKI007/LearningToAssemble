@@ -11,13 +11,12 @@ from numba import njit, prange
 
 @wp.kernel
 def insertion_kernel(mesh_ids: wp.array(dtype=wp.uint64),
-                       pairs: wp.array(dtype=wp.vec2i),
-                       points: wp.array2d(dtype=wp.vec3f),
-                       drts: wp.array(dtype=wp.vec3f),
-                       dist: wp.array3d(dtype=wp.float32),
-                       max_dist: wp.float32,
-                       n_dt_sample: wp.int32):
-
+                     pairs: wp.array(dtype=wp.vec2i),
+                     points: wp.array2d(dtype=wp.vec3f),
+                     drts: wp.array(dtype=wp.vec3f),
+                     dist: wp.array3d(dtype=wp.float32),
+                     max_dist: wp.float32,
+                     n_dt_sample: wp.int32):
     i, j, k = wp.tid()
     drt = drts[i]
     iA = pairs[j][0]
@@ -35,28 +34,29 @@ def insertion_kernel(mesh_ids: wp.array(dtype=wp.uint64),
             if dist[i, j, k] > sign_dist:
                 dist[i, j, k] = sign_dist
 
+
 def compute_insertion_table(parts, settings):
     # drt x part x part
     # i     j        k
     # table[i, j, k] = True if move j-th part along i-th direction does not cause collisions with k-th part
 
-    update_default_settings(settings, "drt",
-                            {
-                                "n_drt_sample": 1000,
-                                "drt_length": 1,
-                                "max_dist": 1,
-                                "collision_eps": 0.01,
-                                "type": "orthogonal",
-                                "n_dt_sample": 10,
-                            })
+    insertion_settings = update_default_settings(settings, "insertion",
+                                       {
+                                           "n_drt_sample": 1000,
+                                           "drt_length": 1,
+                                           "max_dist": 1,
+                                           "collision_eps": 0.01,
+                                           "type": "orthogonal",
+                                           "n_dt_sample": 10,
+                                       })
 
-    n_surface_sample = settings['drt']["n_drt_sample"]
-    drt_length = settings['drt']["drt_length"]
-    max_dist = settings['drt']["max_dist"]
-    collision_eps = settings['drt']["collision_eps"]
-    n_dt_sample = settings['drt']["n_dt_sample"]
+    n_surface_sample = insertion_settings["n_drt_sample"]
+    drt_length = insertion_settings["drt_length"]
+    max_dist = insertion_settings["max_dist"]
+    collision_eps = insertion_settings["collision_eps"]
+    n_dt_sample = insertion_settings["n_dt_sample"]
 
-    if settings['drt']["type"] == "orthogonal":
+    if insertion_settings["type"] == "orthogonal":
         drts = np.array([
             [1, 0, 0],
             [0, 1, 0],
@@ -110,6 +110,7 @@ def compute_insertion_table(parts, settings):
             new_table[idrt, pair[0], pair[1]] = table[idrt, ipair]
     return new_table, drts
 
+
 def check_insertability(current_states: np.array, table: np.array):
     timer = time.perf_counter()
 
@@ -122,24 +123,26 @@ def check_insertability(current_states: np.array, table: np.array):
         flag = True
         for part_id in to_install_parts:
             new_table = table[:, part_id, exist_part_flag[batch_id]].astype(np.int32)
-            new_table = new_table.all(axis = -1)
+            new_table = new_table.all(axis=-1)
             flag = np.logical_and(flag, new_table.any())
         assemblability_flag[batch_id] = flag
 
-    #print("check insertion time", time.perf_counter() - timer)
+    # print("check insertion time", time.perf_counter() - timer)
 
     return assemblability_flag
+
 
 def compute_insertion_drt(part_id, current_state: np.array, table: np.array, drts):
     exist_part_flag = (current_state > 0)
     exist_part_flag[part_id] = False
     new_table = table[:, part_id, exist_part_flag]
-    new_table = new_table.all(axis = -1)
+    new_table = new_table.all(axis=-1)
     indices = new_table.nonzero()[0]
     if indices.shape[0] > 0:
         return drts[indices, :]
     else:
         return None
+
 
 if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings
@@ -167,10 +170,14 @@ if __name__ == '__main__':
         q = np.zeros(len(parts) * 6)
         q[6 * part_id: part_id * 6 + 3] = part_drts[0, :]
         t = 0
+
+
         def callback():
             global t
             changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
             if changed:
                 draw_assembly_motion(parts, part_state, q * t)
+
+
         ps.set_user_callback(callback)
     ps.show()

@@ -9,6 +9,9 @@ from multiprocessing import Queue
 import json
 import trimesh
 from learn2assemble import RESOURCE_DIR, get_gripper_spheres
+from learn2assemble.grasp import compute_grasp_frame, compute_grasp_table
+from learn2assemble.insertion import compute_insertion_drt, compute_insertion_table
+
 
 def init_polyscope():
     ps.init()
@@ -17,18 +20,81 @@ def init_polyscope():
     ps.set_ground_plane_mode("shadow_only")
     ps.set_ground_plane_height(0)
 
+step_id = 0
+t = 0
+q = None
+
+def render_sequence(parts: list[Trimesh],
+                    sequence: np.ndarray,
+                    settings: dict):
+    n_part = len(parts)
+
+    env = settings.get("env", {})
+    boundary_part_ids = env.get("boundary_part_ids", [])
+
+    table_insertion, drts = compute_insertion_table(parts, settings)
+    table_grasp, grasp_frames, scaled_parts = compute_grasp_table(parts, settings)
+    draw_assembly(scaled_parts, sequence[0, :])
+
+    def sequence_callback():
+        global step_id, t, q
+
+        changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=sequence.shape[0] - 1)
+        current_state = sequence[step_id, :]
+
+        if changed:
+            ps.remove_all_structures()
+            ps.remove_all_groups()
+
+            if step_id > 0:
+                prev_state = sequence[step_id - 1, :]
+            else:
+                prev_state = np.zeros(len(parts))
+                prev_state[boundary_part_ids] = 2
+
+            held_state = (current_state == 2)
+            held_state[boundary_part_ids] = False
+            held_parts = held_state.nonzero()[0]
+            for robot_id, part_id in enumerate(held_parts):
+                frames = compute_grasp_frame(part_id, current_state, table_grasp, grasp_frames)
+                if frames is not None:
+                    draw_gripper(frames[0, :], 0.05, f"robot {robot_id}")
+            draw_assembly(scaled_parts, current_state)
+
+            to_install_part_id = np.logical_and(current_state == 2, prev_state != 2).nonzero()[0]
+            q = None
+            if to_install_part_id.shape[0] > 0:
+                to_install_part_id = to_install_part_id[0]
+                part_drts = compute_insertion_drt(to_install_part_id, current_state, table_insertion, drts)
+                if part_drts is not None:
+                    q = np.zeros(n_part * 6)
+                    q[6 * to_install_part_id: to_install_part_id * 6 + 3] = part_drts[0, :]
+
+        if q is not None:
+            changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
+            if changed:
+                draw_assembly_motion(scaled_parts, current_state, t * q)
+
+    ps.set_user_callback(sequence_callback)
+
+
 def render_batch_simulation(parts: list[Trimesh], boundary_part_ids: list = [], queue: Queue = None):
     global storage, step_id
-    #storage = []
-    #step_id = 0
-    camera = {"farClipRatio":20.0,"fov":45.0,"nearClipRatio":0.005,"projectionMode":"Perspective","viewMat":[0.960128843784332,0.279557704925537,-6.99097890688449e-10,-5.19866847991943,-0.19538114964962,0.671027898788452,0.715225756168365,-0.13018886744976,0.199946850538254,-0.686708748340607,0.698893308639526,-9.46305561065674,0.0,0.0,0.0,1.0],"windowHeight":2019,"windowWidth":3840}
+    # storage = []
+    # step_id = 0
+    camera = {"farClipRatio": 20.0, "fov": 45.0, "nearClipRatio": 0.005, "projectionMode": "Perspective",
+              "viewMat": [0.960128843784332, 0.279557704925537, -6.99097890688449e-10, -5.19866847991943,
+                          -0.19538114964962, 0.671027898788452, 0.715225756168365, -0.13018886744976, 0.199946850538254,
+                          -0.686708748340607, 0.698893308639526, -9.46305561065674, 0.0, 0.0, 0.0, 1.0],
+              "windowHeight": 2019, "windowWidth": 3840}
     camera = json.dumps(camera)
+
     def callback():
-        #global storage, step_id
+        # global storage, step_id
         try:
             if queue is not None:
                 queue_data = queue.get(block=False)
-                #storage.append(data)
+                # storage.append(data)
                 if queue_data["type"] == "render":
                     [render_part_states, render_stability] = queue_data["data"]
                     draw_assembly_batches(parts, render_part_states, render_stability, boundary_part_ids, 2)
@@ -44,10 +110,12 @@ def render_batch_simulation(parts: list[Trimesh], boundary_part_ids: list = [], 
         # if changed:
         #     [render_part_states, render_stability] = storage[step_id]
         #     draw_assembly_batches(parts, render_part_states, render_stability, boundary_part_ids, 1.5)
+
     init_polyscope()
     ps.set_view_from_json(camera)
     ps.set_user_callback(callback)
     ps.show()
+
 
 def draw_assembly_motion(parts: list[Trimesh], part_states: np.ndarray, q: np.ndarray):
     for part_id, part_mesh in enumerate(parts):
@@ -155,8 +223,8 @@ def draw_assembly_batches(parts: list[Trimesh],
     scene_mesh = scene.to_geometry()
     colors = np.vstack(colors)
     assembly = ps.register_surface_mesh(f"assembly",
-                             scene_mesh.vertices,
-                             scene_mesh.faces)
+                                        scene_mesh.vertices,
+                                        scene_mesh.faces)
     assembly.add_color_quantity("face", colors, defined_on="faces", enabled=True)
     # wireframe
     sharp = scene_mesh.face_adjacency_angles > np.radians(30)

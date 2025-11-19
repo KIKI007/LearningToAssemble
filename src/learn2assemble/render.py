@@ -7,6 +7,8 @@ import numpy as np
 from scipy.spatial.transform.rotation import Rotation
 from multiprocessing import Queue
 import json
+import trimesh
+from learn2assemble import RESOURCE_DIR, get_gripper_spheres
 
 def init_polyscope():
     ps.init()
@@ -203,3 +205,44 @@ def draw_contacts(contacts: list[dict],
                                      enabled=False)
         ps_cloud.add_vector_quantity(f"y-axes", yaxes, radius=0.02, length=0.05, color=(0.5, 0.5, 0.2),
                                      enabled=False)
+
+
+def draw_gripper(frame: np.ndarray,
+                 open_width: float,
+                 name="pick_gripper"):
+    hand = trimesh.load_mesh(RESOURCE_DIR + "/gripper/hand_camera.obj")
+    finger_left = trimesh.load_mesh(RESOURCE_DIR + "/gripper/finger.obj")
+    finger_right = trimesh.load_mesh(RESOURCE_DIR + "/gripper/finger.obj")
+
+    finger_left.apply_translation([0, 0.0584, -open_width / 2])
+    T = np.eye(4)
+    T[:3, :3] = Rotation.from_euler('xyz', [0, 180, 0], degrees=True).as_matrix()
+    T[:3, 3] = np.array([0, 0.0584, open_width / 2])
+    finger_right.apply_transform(T)
+
+    tcp = np.eye(4)
+    tcp[:3, 3] = [0, 0, -0.1034]
+    tcp[:3, 1] = [0, 0, 1]
+    tcp[:3, 2] = [0, 1, 0]
+    tcp[:3, 0] = [-1, 0, 0]
+
+    sphere_centers, sphere_radius = get_gripper_spheres(np.array([open_width]))
+    sphere_centers = sphere_centers.reshape(-1, 3)
+    sphere_radius = sphere_radius.reshape(-1)
+    sphere_cloud = trimesh.points.PointCloud(vertices=sphere_centers)
+
+    for obj in [hand, finger_left, finger_right]:
+        obj.apply_transform(tcp)
+
+    for obj in [hand, finger_left, finger_right, sphere_cloud]:
+        obj.apply_transform(frame)
+
+    gripper_scene = trimesh.Scene()
+    for obj in [hand, finger_left, finger_right]:
+        gripper_scene.add_geometry(obj)
+    gripper_mesh = gripper_scene.to_mesh()
+
+    ps.register_surface_mesh(f"{name}", gripper_mesh.vertices, gripper_mesh.faces)
+    pcl = ps.register_point_cloud(f"{name}_spheres", sphere_cloud.vertices, enabled=False)
+    pcl.add_scalar_quantity("radius", sphere_radius)
+    pcl.set_point_radius_quantity("radius", autoscale=False)

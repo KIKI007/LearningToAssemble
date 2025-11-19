@@ -5,6 +5,8 @@ from trimesh import Trimesh
 import learn2assemble.simulator
 import time
 from learn2assemble import update_default_settings
+from learn2assemble.grasp import check_graspability, compute_grasp_frame, compute_grasp_table
+from learn2assemble.insertion import check_insertability, compute_insertion_drt, compute_insertion_table
 
 def cluster(part_states: np.ndarray,
             prev_inds: np.ndarray,
@@ -105,14 +107,14 @@ def forward_actions(part_states: np.ndarray,
 
     new_states = np.vstack([install_states, release_states])
     prev_inds = np.hstack([install_prev_inds, release_prev_inds])
-    stability_verifying_flag = np.hstack([np.zeros(install_states.shape[0]), np.ones(release_states.shape[0])]).astype(
+    release_action_flag = np.hstack([np.zeros(install_states.shape[0]), np.ones(release_states.shape[0])]).astype(
         np.bool_)
 
     new_states, unique_indices = np.unique(new_states, axis=0, return_index=True)
     prev_inds = prev_inds[unique_indices]
-    stability_verifying_flag = stability_verifying_flag[unique_indices]
-
-    return new_states, prev_inds, stability_verifying_flag
+    release_action_flag = release_action_flag[unique_indices]
+    install_action_flag = np.logical_not(release_action_flag)
+    return new_states[install_action_flag, :], prev_inds[install_action_flag], new_states[release_action_flag, :], prev_inds[release_action_flag]
 
 
 def check_terminate(part_states: np.ndarray,
@@ -138,6 +140,8 @@ def compute_solution(records):
 
 def forward_curriculum(parts: list[Trimesh],
                        contacts: list[dict],
+                       table_insertion = None,
+                       table_grasp = None,
                        settings: dict = {}):
 
     # parameters
@@ -165,70 +169,133 @@ def forward_curriculum(parts: list[Trimesh],
     while (part_states.shape[0] > 0 and not check_terminate(part_states, boundary_part_ids).any()):
         iter += 1
 
-        part_states, prev_inds, verifying_flag = forward_actions(part_states, n_robot, boundary_part_ids)
+        install_states, install_prev_inds, release_states, release_prev_inds = forward_actions(part_states, n_robot, boundary_part_ids)
 
-        verifying_states = part_states[verifying_flag, :]
-        verifying_prev_inds = prev_inds[verifying_flag]
+        new_states = []
+        prev_inds = []
 
-        nflag = np.logical_not(verifying_flag)
-        part_states = part_states[nflag, :]
-        prev_inds = prev_inds[nflag]
-
-        if verifying_flag.sum() > 0:
+        if release_states.shape[0] > 0:
             timer = time.perf_counter()
-            _, stability_flag = learn2assemble.simulator.simulate(parts, contacts, verifying_states, settings)
-            n_sim = verifying_states.shape[0]
+            _, stability_flag = learn2assemble.simulator.simulate(parts, contacts, release_states, settings)
+            n_sim = release_states.shape[0]
             if verbose:
                 print("step:\t", iter,
                       ",\t sim:\t", f"{np.sum(stability_flag)}/{n_sim}",
                       ",\t time:\t", round((time.perf_counter() - timer) / n_sim, 4))
 
             if stability_flag.sum() > 0:
-                part_states = np.vstack([verifying_states[stability_flag, :], part_states])
-                prev_inds = np.hstack([verifying_prev_inds[stability_flag], prev_inds])
+                new_states = [release_states[stability_flag, :]]
+                prev_inds = [release_prev_inds[stability_flag]]
 
-        if part_states.shape[0] > 0:
-            part_states, prev_inds = cluster(part_states, prev_inds, n_beam)
-            records["part_states"].append(part_states.copy())
+        if install_states.shape[0] > 0:
+            # check insertion
+            if table_insertion is not None:
+                insertability = check_insertability(install_states, table_insertion)
+                install_states = install_states[insertability, :]
+                install_prev_inds = install_prev_inds[insertability]
+
+            # check grasp
+            if install_prev_inds.shape[0] > 0 and table_grasp is not None:
+                graspability_flag = check_graspability(install_states, boundary_part_ids, table_grasp)
+                install_states = install_states[graspability_flag, :]
+                install_prev_inds = install_prev_inds[graspability_flag]
+
+            if install_prev_inds.shape[0] > 0:
+                new_states.append(install_states)
+                prev_inds.append(install_prev_inds)
+
+        if len(new_states) > 0:
+            new_states = np.vstack(new_states)
+            prev_inds = np.hstack(prev_inds)
+
+            new_states, prev_inds = cluster(new_states, prev_inds, n_beam)
+            records["part_states"].append(new_states.copy())
             records["prev_inds"].append(prev_inds.copy())
-            curriculum.append(part_states)
+            curriculum.append(new_states)
         else:
             return False, compute_solution(records), np.vstack(curriculum)
+
+        part_states = new_states.copy()
 
     flag = check_terminate(part_states, boundary_part_ids)
     records["part_states"][-1] = records["part_states"][-1][flag, :]
     records["prev_inds"][-1] = records["prev_inds"][-1][flag]
+
+
     return True, compute_solution(records), np.vstack(curriculum)
 
 
 if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    import torch
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/rulin")
-    default_settings["rbe"]["density"] = 1E4
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-7")
+    default_settings['curriculum']['verbose'] = True
+    default_settings['rbe']['mu'] = 0.2
+    default_settings["assembly"]["contact_shrink_ratio"] = 0.1 # for robustnessly computing the contact surfaces
+    default_settings['curriculum']['n_beam'] = 64
 
+    # debug
+    parts.remove(parts[3]) # for tetris-7
+
+    #
     contacts = compute_assembly_contacts(parts, default_settings)
-    succeed, solution, curriculum = forward_curriculum(parts, contacts, default_settings)
+    table_insertion, drts = compute_insertion_table(parts, default_settings)
+    table_grasp, grasp_frames, scaled_parts = compute_grasp_table(parts, default_settings)
+    succeed, solution, curriculum = forward_curriculum(parts, contacts, table_insertion, table_grasp, default_settings)
     print("succeed:\t", succeed)
 
-    from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts
+    from learn2assemble.render import draw_assembly, init_polyscope, draw_contacts, draw_assembly_motion, draw_gripper
     import polyscope as ps
     import polyscope.imgui as psim
 
     step_id = 0
     init_polyscope()
-    draw_assembly(parts, solution[-1, :])
+    draw_assembly(scaled_parts, solution[-1, :])
+
+    env = default_settings.get("env", {})
+    boundary_part_ids = env.get("boundary_part_ids", [])
+
+    t = 0
+    q = None
+    n_part = len(parts)
 
     def interact():
-        global step_id
+        global step_id, q, t, drts, table_insertion, table_grasp, n_part
         changed, step_id = psim.SliderInt("step", v=step_id, v_min=0, v_max=solution.shape[0] - 1)
+        current_state = solution[step_id, :]
+
         if changed:
             ps.remove_all_structures()
             ps.remove_all_groups()
-            draw_assembly(parts, solution[step_id, :])
+            if step_id > 0:
+                prev_state = solution[step_id - 1, :]
+            else:
+                prev_state = np.zeros(len(parts))
+                prev_state[boundary_part_ids] = 2
 
+            held_state = (current_state == 2)
+            held_state[boundary_part_ids] = False
+            held_parts = held_state.nonzero()[0]
+            for robot_id, part_id in enumerate(held_parts):
+                frames = compute_grasp_frame(part_id, current_state, table_grasp, grasp_frames)
+                if frames is not None:
+                    draw_gripper(frames[0, :], 0.05, f"robot {robot_id}")
+            draw_assembly(scaled_parts, current_state)
+
+            to_install_part_id = np.logical_and(current_state == 2, prev_state != 2).nonzero()[0]
+            q = None
+            if to_install_part_id.shape[0] > 0:
+                to_install_part_id = to_install_part_id[0]
+                part_drts = compute_insertion_drt(to_install_part_id, current_state, table_insertion, drts)
+                if part_drts is not None:
+                    q = np.zeros(n_part * 6)
+                    q[6 * to_install_part_id: to_install_part_id * 6 + 3] = part_drts[0, :]
+
+        if q is not None:
+            changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
+            if changed:
+                draw_assembly_motion(scaled_parts, current_state, t * q)
 
     ps.set_user_callback(interact)
     ps.show()

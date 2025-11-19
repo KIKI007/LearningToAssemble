@@ -1,8 +1,35 @@
 import os
 import torch
+import numpy as np
 RESOURCE_DIR = os.path.abspath(os.path.dirname(__file__) + "/../../data")
 ASSEMBLY_RESOURCE_DIR = os.path.abspath(os.path.dirname(__file__) + "/../../data/assembly")
 
+def get_gripper_spheres(open_widths: np.ndarray = None):
+    import yaml
+    if open_widths is None:
+        open_widths = np.array([0.04])
+    with open(RESOURCE_DIR + "/gripper/spheres.yml", "r") as stream:
+        yml_spheres = yaml.safe_load(stream)
+    spheres_list = []
+    for name in ["hand", "leftfinger", "rightfinger"]:
+        yml_sphere_data = yml_spheres["collision_spheres"][name]
+        spheres_list.extend(yml_sphere_data)
+        if name == "hand":
+            hand_indices = np.arange(0, len(spheres_list))
+        if name == "leftfinger":
+            left_indices = np.arange(hand_indices[-1] + 1, len(spheres_list))
+        if name == "rightfinger":
+            right_indices = np.arange(left_indices[-1] + 1, len(spheres_list))
+    sphere_centers = np.zeros(shape=(open_widths.shape[0], len(spheres_list), 3), dtype=np.float32)
+    sphere_radius = np.zeros(shape=(open_widths.shape[0], len(spheres_list)), dtype=np.float32)
+    for id, data in enumerate(spheres_list):
+        sphere_centers[:, id, :] = data['center']
+        sphere_centers[:, id, 2] += -0.1034
+        sphere_radius[:, id] = data['radius']
+    sphere_centers[:, left_indices, 1] -= open_widths[:, None]
+    sphere_centers[:, right_indices, 1] += open_widths[:, None]
+    sphere_radius[:, hand_indices] += 0.008
+    return sphere_centers, sphere_radius
 
 def update_default_settings(settings: dict,
                             name: str,
@@ -62,7 +89,7 @@ default_settings = settings = {
         "max_entropy_weight": 0.01,
 
         "lr_milestones": [100, 300],
-        "lr_actor": 2e-3,
+        "lr_actor": 1e-4,
         "betas_actor": [0.95, 0.999],
 
         "per_alpha": 0.8,

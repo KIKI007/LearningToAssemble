@@ -1,0 +1,80 @@
+##
+## Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+##
+## NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+## property and proprietary rights in and to this material, related
+## documentation and any modifications thereto. Any use, reproduction,
+## disclosure or distribution of this material and related documentation
+## without an express license agreement from NVIDIA CORPORATION or
+## its affiliates is strictly prohibited.
+##
+collision_spheres:
+  hand:
+    - "center": [ 0.0, -0.075, 0.01 ]
+      "radius": 0.023
+    - "center": [ 0.0, -0.045, 0.01 ]
+      "radius": 0.023
+    - "center": [ 0.0, -0.015, 0.01 ]
+      "radius": 0.023
+    - "center": [ 0.0, 0.015, 0.01 ]
+      "radius": 0.023
+    - "center": [ 0.0, 0.045, 0.01 ]
+      "radius": 0.023
+    - "center": [ 0.0, 0.075, 0.01 ]
+      "radius": 0.023
+    - "center": [ 0.0, -0.08, 0.03 ]
+      "radius": 0.022
+    - "center": [ 0.0, -0.045, 0.03 ]
+      "radius": 0.022
+    - "center": [ 0.0, -0.015, 0.03 ]
+      "radius": 0.022
+    - "center": [ 0.0, 0.015, 0.03 ]
+      "radius": 0.022
+    - "center": [ 0.0, 0.045, 0.03 ]
+      "radius": 0.022
+    - "center": [ 0.0, 0.08, 0.03 ]
+      "radius": 0.022
+    - "center": [ 0.0, -0.08, 0.045 ]
+      "radius": 0.022
+    - "center": [ 0.0, -0.045, 0.045 ]
+      "radius": 0.022
+    - "center": [ 0.0, -0.015, 0.045 ]
+      "radius": 0.022
+    - "center": [ 0.0, 0.015, 0.045 ]
+      "radius": 0.022
+    - "center": [ 0.0, 0.045, 0.045 ]
+      "radius": 0.022
+    - "center": [ 0.0, 0.08, 0.045 ]
+      "radius": 0.022
+
+
+    - "center": [ 0.084, -0.025, 0.014 ]
+      "radius": 0.014
+    - "center": [ 0.084, 0.025, 0.014 ]
+      "radius": 0.014
+    - "center": [ 0.084, 0.00, 0.014 ]
+      "radius": 0.014
+    - "center": [ 0.056, 0.00, 0.014 ]
+      "radius": 0.014
+    - "center": [ 0.028, 0.00, 0.014 ]
+      "radius": 0.014
+    - "center": [ 0.000, 0.00, 0.014 ]
+      "radius": 0.014
+  leftfinger:
+    - "center": [ 0.0, .014, 0.108 ]
+      "radius": 0.01
+    - "center": [ 0.0, .014, 0.098 ]
+      "radius": 0.01
+    - "center": [ 0.0, 0.005, 0.088 ]
+      "radius": 0.015
+    - "center": [ 0.0, 0.005, 0.078 ]
+      "radius": 0.015
+  rightfinger:
+    - "center": [ 0.0, -.014, 0.108 ]
+      "radius": 0.01
+    - "center": [ 0.0, -.014, 0.098 ]
+      "radius": 0.01
+    - "center": [ 0.0, -.005, 0.088 ]
+      "radius": 0.015
+    - "center": [ 0.0, -.005, 0.078 ]
+      "radius": 0.015

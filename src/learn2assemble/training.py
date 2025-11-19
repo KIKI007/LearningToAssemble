@@ -18,7 +18,8 @@ import time
 from multiprocessing import Queue
 
 import wandb
-
+from learn2assemble.grasp import compute_grasp_table
+from learn2assemble.insertion import compute_insertion_table
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
 intType = torch.int32
@@ -125,8 +126,11 @@ def evaluation(parts: list[Trimesh],
 def train(parts: list[Trimesh],
           contacts: dict,
           settings: dict,
+          check_gasp: bool = False,
+          check_insertion: bool = False,
           checkpoint : str = None,
           wandb = None):
+
     training_settings = update_default_settings(settings,
                                     "training", {
                                         "max_train_epochs": 50000,
@@ -148,6 +152,11 @@ def train(parts: list[Trimesh],
 
     # create env and ppo
     env = DisassemblyEnv(parts, contacts, settings=settings)
+    if check_gasp:
+        env.table_grasp, env.grasp_frames, env.scaled_parts = compute_grasp_table(parts, settings)
+    if check_insertion:
+        env.table_insertion, env.drts = compute_insertion_table(parts, settings)
+
     ppo_agent = PPO(parts, contacts, settings)
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
 
@@ -162,7 +171,7 @@ def train(parts: list[Trimesh],
             ppo_agent.policy_old.load_state_dict(state_dict)
 
     # forward curriculum
-    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
+    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings, table_insertion=env.table_insertion, table_grasp=env.table_grasp)
     env.set_curriculum(curriculum)
     ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
 

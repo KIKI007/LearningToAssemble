@@ -10,6 +10,8 @@ from learn2assemble.buffer import RolloutBuffer
 from multiprocessing import Process, Queue
 
 
+from learn2assemble.insertion import check_insertability
+from learn2assemble.grasp import check_graspability
 
 class Timer:
     def __init__(self):
@@ -72,6 +74,9 @@ class DisassemblyEnv:
         self.stability_history = {}
         self.updated_simulation = False
 
+        self.table_insertion = None
+        self.table_grasp = None
+
         # set the complete assembly state as curriculum
         curriculum = np.ones((1, len(parts)), dtype=np.int32)
         curriculum[0, self.boundary_part_ids] = 2
@@ -116,7 +121,17 @@ class DisassemblyEnv:
             self.timer.start("simulation")
             part_states = np.vstack(self.sim_buffer[:num_to_sim])
             _, stable_flag = learn2assemble.simulator.simulate(self.parts, self.contacts, part_states, self.settings)
+
+            if self.table_insertion is not None:
+                insertion_flag = check_insertability(part_states, self.table_insertion)
+                stable_flag = np.logical_and(stable_flag, insertion_flag)
+
+            if self.table_grasp is not None:
+                grasp_flag = check_graspability(part_states, self.boundary_part_ids, self.table_grasp)
+                stable_flag = np.logical_and(stable_flag, grasp_flag)
+
             elapse, _ = self.timer.stop("simulation")
+
             if self.verbose:
                 print(f"num_sim {part_states.shape[0]}, \t avg_sim {round(elapse / part_states.shape[0], 4)}")
 

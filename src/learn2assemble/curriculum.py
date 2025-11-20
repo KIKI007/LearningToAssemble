@@ -5,8 +5,8 @@ from trimesh import Trimesh
 import learn2assemble.simulator
 import time
 from learn2assemble import update_default_settings
-from learn2assemble.grasp import check_graspability, compute_grasp_frame, compute_grasp_table
-from learn2assemble.insertion import check_insertability, compute_insertion_drt, compute_insertion_table
+from learn2assemble.grasp import check_future_graspability, compute_grasp_frame, compute_grasp_table
+from learn2assemble.insertion import check_future_insertability, compute_insertion_drt, compute_insertion_table
 
 def cluster(part_states: np.ndarray,
             prev_inds: np.ndarray,
@@ -190,13 +190,13 @@ def forward_curriculum(parts: list[Trimesh],
         if install_states.shape[0] > 0:
             # check insertion
             if table_insertion is not None:
-                insertability = check_insertability(install_states, table_insertion)
+                insertability = check_future_insertability(install_states, table_insertion)
                 install_states = install_states[insertability, :]
                 install_prev_inds = install_prev_inds[insertability]
 
             # check grasp
             if install_prev_inds.shape[0] > 0 and table_grasp is not None:
-                graspability_flag = check_graspability(install_states, boundary_part_ids, table_grasp)
+                graspability_flag = check_future_graspability(install_states, boundary_part_ids, table_grasp)
                 install_states = install_states[graspability_flag, :]
                 install_prev_inds = install_prev_inds[graspability_flag]
 
@@ -221,7 +221,10 @@ def forward_curriculum(parts: list[Trimesh],
     records["part_states"][-1] = records["part_states"][-1][flag, :]
     records["prev_inds"][-1] = records["prev_inds"][-1][flag]
 
-
+    # append complete state to the end
+    complete_state = np.ones(len(parts), dtype=np.int32)
+    complete_state[boundary_part_ids] = 2
+    curriculum.append(complete_state)
     return True, compute_solution(records), np.vstack(curriculum)
 
 

@@ -35,8 +35,6 @@ if __name__ == "__main__":
         policy = name
     default_settings["n_robot"] = args.robot
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + f"/{name}")
-    contacts = compute_assembly_contacts(parts, default_settings)
     pretrained_file = f"../models/{policy}.pol"
     with open(pretrained_file, 'rb') as handle:
         agent = pickle.load(handle)
@@ -45,6 +43,9 @@ if __name__ == "__main__":
 
     default_settings["rbe"]["pre-computed"] = False
     default_settings["admm"]["pre-computed"] = False
+
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + f"/{name}")
+    contacts = compute_assembly_contacts(parts, default_settings)
 
     env = DisassemblyEnv(parts, contacts, settings=default_settings)
     if args.grasp:
@@ -55,11 +56,12 @@ if __name__ == "__main__":
     # single forward curriculum (training)
     torch_geometric.seed.seed_everything(default_settings["env"]["seed"])
     env.num_rollouts = env.curriculum.shape[0]
+    # env.curriculum = env.curriculum.repeat(8, axis = 0)
 
     ppo_agent = PPO(env.parts, env.contacts, default_settings)
     ppo_agent.policy_old.load_state_dict(state_dict)
     ppo_agent.policy.load_state_dict(state_dict)
-    ppo_agent.deterministic = True
+    ppo_agent.deterministic = False
 
     part_states = env.curriculum
     ppo_agent.buffer.clear_replay_buffer(part_states.shape[0])
@@ -88,7 +90,7 @@ if __name__ == "__main__":
 
     env.simulate_buffer(simulate_remain=True)
     _, rewards = ppo_agent.buffer.get_valid_env_inds(env)
-
+    print(rewards)
     sequence = np.vstack(ppo_agent.buffer.next_states[0][::-1])
 
     init_polyscope()

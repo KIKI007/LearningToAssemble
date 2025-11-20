@@ -10,8 +10,8 @@ from learn2assemble.buffer import RolloutBuffer
 from multiprocessing import Process, Queue
 
 
-from learn2assemble.insertion import check_insertability
-from learn2assemble.grasp import check_graspability
+from learn2assemble.insertion import compute_insertion_masks
+from learn2assemble.grasp import compute_grasp_masks
 
 class Timer:
     def __init__(self):
@@ -121,15 +121,6 @@ class DisassemblyEnv:
             self.timer.start("simulation")
             part_states = np.vstack(self.sim_buffer[:num_to_sim])
             _, stable_flag = learn2assemble.simulator.simulate(self.parts, self.contacts, part_states, self.settings)
-
-            if self.table_insertion is not None:
-                insertion_flag = check_insertability(part_states, self.table_insertion)
-                stable_flag = np.logical_and(stable_flag, insertion_flag)
-
-            if self.table_grasp is not None:
-                grasp_flag = check_graspability(part_states, self.boundary_part_ids, self.table_grasp)
-                stable_flag = np.logical_and(stable_flag, grasp_flag)
-
             elapse, _ = self.timer.stop("simulation")
 
             if self.verbose:
@@ -202,6 +193,15 @@ class DisassemblyEnv:
         # installed & fixed & removable parts can be removed
         remove_mask = np.logical_and(part_installed_states == 1, part_held_states == 1)
         remove_mask[:, self.boundary_part_ids] = 0
+
+        if self.table_insertion is not None and remove_mask.sum() > 0:
+            insertion_masks = compute_insertion_masks(part_states, self.boundary_part_ids, self.table_insertion)
+            remove_mask = np.logical_and(remove_mask, insertion_masks)
+
+        if self.table_grasp is not None and hold_mask.sum() > 0:
+            grasp_masks = compute_grasp_masks(part_states, self.table_grasp)
+            hold_mask = np.logical_and(hold_mask, grasp_masks)
+
         return np.hstack([hold_mask, remove_mask])
 
     def next_states(self, part_states: np.ndarray, actions: np.ndarray):

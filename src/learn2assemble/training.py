@@ -149,13 +149,19 @@ def train(parts: list[Trimesh],
     training_settings = update_default_settings(settings,
                                     "training", {
                                         "max_train_epochs": 50000,
-                                        "save_delta_accuracy": 0.01,
                                         "print_epochs": 1,
+                                        "save_epochs": 5,
                                         "policy_update_batch_size": 2048,
                                         "K_epochs": 5,
                                         "policy_name": "example",
                                         "num_render_debug": 8 * 8,
-                                        "accuracy_terminate_threshold": 0.98,
+                                        "terminate_nondeterminstic_accuracy": 0.9,
+                                        "terminate_determinstic_accuracy": 0.98,
+                                        "terminate_complete_assembly_accuracy": 0.98,
+                                        "full_assembly_ratio": 0.05,
+
+
+
                                     })
     training_settings = SimpleNamespace(**training_settings)
 
@@ -192,7 +198,7 @@ def train(parts: list[Trimesh],
     while ppo_agent.episode <= training_settings.max_train_epochs:
 
         # the first several run is to visit all curriculum
-        curriculum_inds, sample_new_curriculum = ppo_agent.buffer.sample_curriculum(env.num_rollouts)
+        curriculum_inds, sample_new_curriculum, complete_assembly_inds = ppo_agent.buffer.sample_curriculum(env.num_rollouts, training_settings.full_assembly_ratio)
         ppo_agent.buffer.curriculum_inds = curriculum_inds
         rewards = ppo_agent.buffer.rewards = training_rollout(ppo_agent, env, curriculum_inds, training_settings, None)
 
@@ -205,6 +211,7 @@ def train(parts: list[Trimesh],
         ppo_agent.buffer.modify_entropy()
 
         # save policy
+        accuracy_of_complete_assembly = torch.sum(rewards[complete_assembly_inds]> 0).item() / complete_assembly_inds.shape[0]
         accuracy_of_sample_curriculum = (torch.sum(rewards > 0) / rewards.shape[0]).item()
         accuracy_of_entire_curriculum = None
         if (ppo_agent.episode + 1) % save_epochs == 0 and not sample_new_curriculum:
@@ -230,8 +237,8 @@ def train(parts: list[Trimesh],
         # print status
         episode_time = time.perf_counter() - ppo_agent.episode_timer
         print("")
-        print("Episode : {} \t\t Accuracy : {:.2f}\t\t Time : {:.2f}".format(ppo_agent.episode,
-                                                                             accuracy_of_sample_curriculum, episode_time))
+        print("Episode : {} \t\t Accuracy : {:.2f}/{:.2f}\t\t Time : {:.2f}".format(ppo_agent.episode,
+                                                                             accuracy_of_sample_curriculum, accuracy_of_complete_assembly, episode_time))
         print("Loss : {:.2e} \t\t Sur: {:.2e} \t\t Val: {:.2e} \t\t Entropy : {:.2e}".format(loss, sur_loss, val_loss,
                                                                                              entropy))
 
@@ -243,6 +250,7 @@ def train(parts: list[Trimesh],
                        "sim_time": env.timer("simulation"),
                        "history_time": env.timer("history"),
                        "accuracy_sampled": accuracy_of_sample_curriculum,
+                       "accuracy_complete": accuracy_of_complete_assembly,
                        "loss": loss,
                        "entropy": entropy,
                        "value loss": val_loss,
@@ -253,6 +261,7 @@ def train(parts: list[Trimesh],
 
             # exit
             if  accuracy_of_entire_curriculum > training_settings.terminate_nondeterminstic_accuracy\
-            and accuracy_of_entire_curriculum_determinstic > training_settings.terminate_determinstic_accuracy:
+            and accuracy_of_entire_curriculum_determinstic > training_settings.terminate_determinstic_accuracy\
+            and accuracy_of_complete_assembly > training_settings.terminate_complete_assembly_accuracy:
                 break
         ppo_agent.episode = ppo_agent.episode + 1

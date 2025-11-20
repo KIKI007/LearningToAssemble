@@ -111,7 +111,7 @@ def compute_insertion_table(parts, settings):
     return new_table, drts
 
 
-def check_insertability(current_states: np.array, table: np.array):
+def check_future_insertability(current_states: np.array, table: np.array):
     timer = time.perf_counter()
 
     # check assemblability
@@ -126,11 +126,21 @@ def check_insertability(current_states: np.array, table: np.array):
             new_table = new_table.all(axis=-1)
             flag = np.logical_and(flag, new_table.any())
         assemblability_flag[batch_id] = flag
-
     # print("check insertion time", time.perf_counter() - timer)
-
     return assemblability_flag
 
+def compute_insertion_masks(current_states: np.array, boundart_part_ids: np.array, table: np.array):
+    held_flag = (current_states == 2)
+    held_flag[:, boundart_part_ids] = False
+    insertion_masks = held_flag.copy()
+    exist_part_flag = (current_states > 0)
+    for batch_id in range(current_states.shape[0]):
+        to_removed_parts = held_flag[batch_id].nonzero()[0]
+        for part_id in to_removed_parts:
+            new_table = table[:, part_id, exist_part_flag[batch_id]].astype(np.int32)
+            new_table = new_table.all(axis=-1)
+            insertion_masks[batch_id, part_id] = new_table.any()
+    return insertion_masks
 
 def compute_insertion_drt(part_id, current_state: np.array, table: np.array, drts):
     exist_part_flag = (current_state > 0)
@@ -159,7 +169,7 @@ if __name__ == '__main__':
     part_states[0, 24] = 1
     part_states[0, 15] = 1
     part_states[0, 0] = 1
-    assemblability_flag = check_insertability(part_states, table)
+    assemblability_flag = check_future_insertability(part_states, table)
     part_id = 15
     part_drts = compute_insertion_drt(part_id, part_states.reshape(-1), table, drts)
 

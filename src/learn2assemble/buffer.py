@@ -123,7 +123,7 @@ class RolloutBuffer:
         for name in names:
             self.__dict__[name][env_id] = self.__dict__[name][env_id][: step_id]
 
-    def sample_curriculum(self, num_rollouts):
+    def sample_curriculum(self, num_rollouts, complete_assembly_ratio = 0):
         visited = self.curriculum_visited
         rank = self.curriculum_rank
         num_nonvisited = (visited == False).sum()
@@ -139,7 +139,10 @@ class RolloutBuffer:
             inds = torch.arange(1, rank.shape[0] + 1, device=device, dtype=floatType)
             sample_weights = torch.pow(inds, -self.per_alpha) / torch.pow(inds, -self.per_alpha).sum()
             curriculum_inds = torch.multinomial(sample_weights[rank], num_rollouts, True)
-        return curriculum_inds.cpu(), sample_new_curriculum
+        # add complete assemble
+        complete_assembly_inds = torch.arange(num_rollouts - max(int (num_rollouts * complete_assembly_ratio), 1), num_rollouts, device=device, dtype=intType)
+        curriculum_inds[complete_assembly_inds] = len(self.curriculum_rank) - 1
+        return curriculum_inds.cpu(), sample_new_curriculum, complete_assembly_inds.cpu()
 
     def get_current_states_for_rendering(self, num_render):
         batch_part_states = []

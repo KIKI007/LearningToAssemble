@@ -256,7 +256,7 @@ def compute_grasp_table(parts: list[trimesh.Trimesh], settings: dict):
     return table, list_grasp_frames, scaled_parts
 
 
-def check_graspability(current_states, boundary_part_ids, table):
+def check_future_graspability(current_states, boundary_part_ids, table):
     # check assemblability
     to_install_parts_flag = (current_states == 0)
     exist_parts_flag = (current_states > 0)
@@ -278,6 +278,17 @@ def check_graspability(current_states, boundary_part_ids, table):
     # print("graspability time", time.perf_counter() - timer)
     return graspability_flag
 
+def compute_grasp_masks(current_states: np.ndarray, table: list):
+    nonheld_flag = (current_states == 1)
+    grasp_masks = nonheld_flag.copy()
+    exist_parts_flag = (current_states > 0)
+
+    for batch_id in range(current_states.shape[0]):
+        to_held_parts = nonheld_flag[batch_id].nonzero()[0]
+        for part_id in to_held_parts:
+            new_table = table[part_id][:, exist_parts_flag[batch_id]]
+            grasp_masks[batch_id, part_id] = np.all(new_table, axis=-1).any()
+    return grasp_masks
 
 def compute_grasp_frame(part_id, current_state, table, grasp_frames):
     exist_parts_flag = (current_state > 0)
@@ -307,7 +318,7 @@ if __name__ == '__main__':
     part_states = np.ones((1, len(parts)))
     part_states[0, 3] = 2
     part_states[0, 5] = 1
-    print(check_graspability(part_states, [0], table))
+    print(check_future_graspability(part_states, [0], table))
     current_state = part_states[0, :]
     draw_assembly(scaled_parts, current_state)
     held_parts = (current_state == 2).nonzero()[0]

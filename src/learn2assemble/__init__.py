@@ -102,12 +102,15 @@ default_settings = settings = {
     "training": {
         "max_train_epochs": 5000,
         "save_epochs": 5,
+        "print_epochs": 1,
         "policy_update_batch_size": 1024,
         "K_epochs": 5,
         "policy_name": "example",
+        "num_render_debug": 4 * 4,
         "terminate_nondeterminstic_accuracy": 0.9,
         "terminate_determinstic_accuracy": 0.98,
-        "num_render_debug": 4 * 4,
+        "terminate_complete_assembly_accuracy": 0.98,
+        "full_assembly_ratio": 0.05,
     },
     "grasp":
         {

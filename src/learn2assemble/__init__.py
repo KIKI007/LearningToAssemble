@@ -47,7 +47,7 @@ def update_default_settings(settings: dict,
 
 default_settings = settings = {
     "assembly": {
-        "contact_shrink_ratio": 0.0,
+        "contact_shrink_ratio": 0.1,
     },
     "env": {
         "n_robot": 2,
@@ -59,7 +59,7 @@ default_settings = settings = {
     },
     "rbe": {
         "nt": 8,
-        "mu": 0.55,
+        "mu": 0.2,
         "Ccp": 1E6,
         "density": 1E2,
         "velocity_tol": 1e-2,
@@ -118,7 +118,7 @@ default_settings = settings = {
         },
     "insertion":
         {
-            "n_drt_sample": 1000,
+            "n_surface_sample": 1000,
             "drt_length": 1,
             "max_dist": 1,
             "collision_eps": 0.01,

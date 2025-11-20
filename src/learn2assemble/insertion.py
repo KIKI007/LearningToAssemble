@@ -42,7 +42,7 @@ def compute_insertion_table(parts, settings):
 
     insertion_settings = update_default_settings(settings, "insertion",
                                        {
-                                           "n_drt_sample": 1000,
+                                           "n_surface_sample": 1000,
                                            "drt_length": 1,
                                            "max_dist": 1,
                                            "collision_eps": 0.01,
@@ -50,7 +50,7 @@ def compute_insertion_table(parts, settings):
                                            "n_dt_sample": 10,
                                        })
 
-    n_surface_sample = insertion_settings["n_drt_sample"]
+    n_surface_sample = insertion_settings["n_surface_sample"]
     drt_length = insertion_settings["drt_length"]
     max_dist = insertion_settings["max_dist"]
     collision_eps = insertion_settings["collision_eps"]
@@ -72,7 +72,7 @@ def compute_insertion_table(parts, settings):
     wp_parts = []
     wp_parts_id = []
     for part_id, part in enumerate(parts):
-        pts = trimesh.sample.sample_surface(part, n_surface_sample, None)
+        pts = trimesh.sample.sample_surface(part, n_surface_sample, None, seed = 0)
         points.append(pts[0])
 
         wp_part = wp.Mesh(

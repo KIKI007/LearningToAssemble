@@ -141,7 +141,7 @@ def compute_solution(records):
 def forward_curriculum(parts: list[Trimesh],
                        contacts: list[dict],
                        table_insertion = None,
-                       table_grasp = None,
+                       table_grasp=None,
                        settings: dict = {}):
 
     # parameters
@@ -232,7 +232,7 @@ if __name__ == '__main__':
     import polyscope as ps
     import polyscope.imgui as psim
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-8")
     default_settings['curriculum']['verbose'] = True
     default_settings['rbe']['mu'] = 0.2
     default_settings["assembly"]["contact_shrink_ratio"] = 0.1 # for robustnessly computing the contact surfaces

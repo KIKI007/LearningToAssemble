@@ -107,7 +107,7 @@ def evaluation(parts: list[Trimesh],
 
     # single forward curriculum (training)
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
-    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
+    _, _, curriculum = forward_curriculum(parts, contacts, table_insertion=env.table_insertion, table_grasp=env.table_grasp, settings=settings)
     env.set_curriculum(curriculum)
     env.num_rollouts = env.curriculum.shape[0]
     accuracy = compute_accuracy(env, state_dict, settings, True, queue)
@@ -117,7 +117,7 @@ def evaluation(parts: list[Trimesh],
     # double forward curriculum (testing)
     settings["curriculum"]["n_beam"] *= 2
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
-    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings)
+    _, _, curriculum = forward_curriculum(parts, contacts, table_insertion=env.table_insertion, table_grasp=env.table_grasp, settings=settings)
     new_curriculum = []
     for part_state in curriculum:
         if env.get_history(part_state) == 0:
@@ -137,6 +137,15 @@ def train(parts: list[Trimesh],
           checkpoint : str = None,
           wandb = None):
 
+    # load existing policy
+    state_dict = None
+    if checkpoint is not None:
+        pretrained_file = f"./models/{checkpoint}.pol"
+        with open(pretrained_file, 'rb') as handle:
+            agent = pickle.load(handle)
+            state_dict = agent['state_dict']
+            settings = agent['settings']
+
     training_settings = update_default_settings(settings,
                                     "training", {
                                         "max_train_epochs": 50000,
@@ -150,12 +159,6 @@ def train(parts: list[Trimesh],
                                     })
     training_settings = SimpleNamespace(**training_settings)
 
-    # policy output folder
-    folder_path = f"./models"
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)  # Create the folder
-    saved_model_path = f"{folder_path}/{training_settings.policy_name}.pol"
-
     # create env and ppo
     env = DisassemblyEnv(parts, contacts, settings=settings)
     if check_grasp:
@@ -164,20 +167,20 @@ def train(parts: list[Trimesh],
         env.table_insertion, env.drts = compute_insertion_table(parts, settings)
 
     ppo_agent = PPO(parts, contacts, settings)
+    if state_dict is not None:
+        ppo_agent.policy.load_state_dict(state_dict)
+        ppo_agent.policy_old.load_state_dict(state_dict)
+
     torch_geometric.seed.seed_everything(settings["env"]["seed"])
 
-    # load existing policy
-    if checkpoint is not None:
-        pretrained_file = f"./models/{checkpoint}.pol"
-        with open(pretrained_file, 'rb') as handle:
-            agent = pickle.load(handle)
-            state_dict = agent['state_dict']
-            settings = agent['settings']
-            ppo_agent.policy.load_state_dict(state_dict)
-            ppo_agent.policy_old.load_state_dict(state_dict)
+    # policy output folder
+    folder_path = f"./models"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)  # Create the folder
+    saved_model_path = f"{folder_path}/{training_settings.policy_name}.pol"
 
     # forward curriculum
-    _, _, curriculum = forward_curriculum(parts, contacts, settings=settings, table_insertion=env.table_insertion, table_grasp=env.table_grasp)
+    _, _, curriculum = forward_curriculum(parts, contacts, table_insertion=env.table_insertion, table_grasp=env.table_grasp, settings=settings)
     env.set_curriculum(curriculum)
     ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
 
@@ -218,7 +221,6 @@ def train(parts: list[Trimesh],
             if accuracy_of_entire_curriculum > ppo_agent.accuracy_of_entire_curriculum:
                 ppo_agent.accuracy_of_entire_curriculum = accuracy_of_entire_curriculum
                 ppo_agent.save(saved_model_path, settings)
-
 
         # policy update
         loss, sur_loss, val_loss, entropy = ppo_agent.update_policy(

@@ -72,7 +72,7 @@ def sample_grasp_frames(mesh,
                         wp_mesh_id,
                         num_of_samples: int = 100,
                         gripper_width: float = 0.08,
-                        seed: int = None):
+                        seed: int = 0):
     wp.set_device("cuda")
 
     # sample frames
@@ -89,7 +89,7 @@ def sample_grasp_frames(mesh,
     wp_flag = wp.zeros(shape=num_of_samples, dtype=wp.bool, device="cuda")
     wp.launch(sample_grasp_poses_kernel,
               dim=num_of_samples,
-              inputs=[wp_mesh_id, wp_face_ids, wp_frames, wp_open_widths, wp_flag, gripper_width, 10],
+              inputs=[wp_mesh_id, wp_face_ids, wp_frames, wp_open_widths, wp_flag, gripper_width, seed],
               device='cuda')
 
     # remove invalid
@@ -300,6 +300,9 @@ if __name__ == '__main__':
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
 
     table, grasp_frames, scaled_parts = compute_grasp_table(parts, settings)
+    table, grasp_frames2, scaled_parts = compute_grasp_table(parts, settings)
+
+    print(grasp_frames2[1] - grasp_frames[1])
 
     part_states = np.ones((1, len(parts)))
     part_states[0, 3] = 2

@@ -118,7 +118,7 @@ class ActorCriticGATG(nn.Module):
 
     def act(self, state, mask, deterministic=False):
         action_probs, state_val = self.actor(state)
-        action_probs = mask * action_probs + mask * self.mask_prob
+        action_probs = mask * action_probs + self.mask_prob
         dist = Categorical(action_probs)
         if deterministic:
             action = torch.argmax(dist.probs, dim = -1)
@@ -129,7 +129,7 @@ class ActorCriticGATG(nn.Module):
 
     def evaluate(self, state, action, mask):
         action_probs, state_values = self.actor(state)
-        action_probs = mask * action_probs + mask * self.mask_prob
+        action_probs = mask * action_probs + self.mask_prob
         dist = Categorical(action_probs)
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()

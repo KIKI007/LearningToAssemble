@@ -236,9 +236,9 @@ class DisassemblyEnv:
         valid_action_flag = masks[inds, actions]
         rewards = np.where(valid_action_flag, 0, -1).astype(np.int32)  # 2 means not know
 
-        if not np.all(valid_action_flag):
-            # all action must be valid
-            print("Illegal action taken")
+        # if not np.all(valid_action_flag):
+        #     # all action must be valid
+        #     print("Illegal action taken")
 
         # success termination
         success_flag = np.logical_and(self.check_terminate(new_part_states), valid_action_flag)

@@ -157,11 +157,8 @@ def train(parts: list[Trimesh],
                                         "num_render_debug": 8 * 8,
                                         "terminate_nondeterminstic_accuracy": 0.9,
                                         "terminate_determinstic_accuracy": 0.98,
-                                        "terminate_complete_assembly_accuracy": 0.98,
+                                        "terminate_complete_assembly_accuracy": 0.95,
                                         "full_assembly_ratio": 0.05,
-
-
-
                                     })
     training_settings = SimpleNamespace(**training_settings)
 

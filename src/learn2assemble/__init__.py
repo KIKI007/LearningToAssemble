@@ -109,7 +109,7 @@ default_settings = settings = {
         "num_render_debug": 4 * 4,
         "terminate_nondeterminstic_accuracy": 0.9,
         "terminate_determinstic_accuracy": 0.98,
-        "terminate_complete_assembly_accuracy": 0.98,
+        "terminate_complete_assembly_accuracy": 0.95,
         "full_assembly_ratio": 0.05,
     },
     "grasp":

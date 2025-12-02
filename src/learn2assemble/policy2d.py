@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.nn import init
 import time
-from torch.nn import Linear, Conv1d, BatchNorm1d, Conv3d, InstanceNorm3d, AdaptiveAvgPool1d, ModuleList
+from torch.nn import Linear, Conv1d, BatchNorm1d, Conv2d, InstanceNorm3d, AdaptiveAvgPool1d, ModuleList
 import math
 import numpy as np
 from types import SimpleNamespace
@@ -30,18 +30,18 @@ def weights_init_kaiming(m):
 class Upsample(nn.Module):
     def __init__(self,inchannels, outchannels,factor=2.0):
         super(Upsample,self).__init__()
-        self.conv = nn.Conv3d(inchannels,outchannels,kernel_size=3,stride=1,padding=1)
+        self.conv = nn.Conv2d(inchannels,outchannels,kernel_size=3,stride=1,padding=1)
         self.factor = factor
 
     def forward(self,x):
-        x = torch.nn.functional.interpolate(x, scale_factor=self.factor, mode="trilinear",align_corners=False)
+        x = torch.nn.functional.interpolate(x, scale_factor=self.factor, mode="bicubic",align_corners=False)
         x = self.conv(x)
         return x
 
 class Downsample(nn.Module):
     def __init__(self,inchannels, outchannels,factor=2):
         super(Downsample,self).__init__()
-        self.conv = nn.Conv3d(inchannels,outchannels,kernel_size=4,stride=factor,padding=1)
+        self.conv = nn.Conv2d(inchannels,outchannels,kernel_size=4,stride=factor,padding=1)
 
     def forward(self,x):
         x = self.conv(x)
@@ -57,13 +57,13 @@ class ResidualLayer(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        self.conv1 = nn.Conv3d(in_channels, out_channels//4,kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv3d(out_channels//4, out_channels//4,kernel_size=3, padding=1, bias=False)
-        self.conv3 = nn.Conv3d(out_channels//4, out_channels,kernel_size=3, padding=1, bias=False)
-        self.ac = nn.ReLU()
+        self.conv1 = nn.Conv2d(in_channels, out_channels//4,kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(out_channels//4, out_channels//4,kernel_size=3, padding=1, bias=False)
+        self.conv3 = nn.Conv2d(out_channels//4, out_channels,kernel_size=3, padding=1, bias=False)
+        self.ac = nn.LeakyReLU()
 
         if self.in_channels != self.out_channels:
-            self.shortcut = nn.Conv3d(in_channels, out_channels,kernel_size=3, padding=1, bias=False)
+            self.shortcut = nn.Conv2d(in_channels, out_channels,kernel_size=3, padding=1, bias=False)
 
     def forward(self, x) :
 
@@ -82,7 +82,7 @@ class ResidualLayer(nn.Module):
 
         return x + h
 
-class UNet(nn.Module):
+class UNet2D(nn.Module):
     def __init__(self, out_channels, ch, grid, scale=3, num_blocks=1):
         super().__init__()
 
@@ -90,9 +90,9 @@ class UNet(nn.Module):
         self.ch = ch
         self.grid = grid
         self.num_blocks = num_blocks
-        self.ac = nn.ReLU()
+        self.ac = nn.LeakyReLU()
 
-        self.embedding_contact = torch.nn.Embedding(64, self.ch // 2)
+        self.embedding_contact = torch.nn.Linear(6, self.ch // 2)
         self.embedding_part_state = torch.nn.Embedding(4, self.ch // 2)
 
         self.down = nn.ModuleList()
@@ -118,11 +118,11 @@ class UNet(nn.Module):
 
         self.mid.block_1 = ResidualLayer(self.ch,self.ch)
         self.mid.block_2 = ResidualLayer(self.ch,self.ch)
-        self.v_mlp = nn.Linear(in_features=self.ch * self.grid * self.grid * self.grid, out_features=1)
+        self.v_mlp = nn.Linear(in_features=self.ch * self.grid * self.grid, out_features=1)
 
         # Build Decoder
         self.up = nn.ModuleList()
-        self.conv_in = nn.Conv3d(self.ch, self.ch, kernel_size=3,stride=1,padding=1)
+        self.conv_in = nn.Conv2d(self.ch, self.ch, kernel_size=3,stride=1,padding=1)
 
         for i in range(scale,1,-1):
             block = nn.Module()
@@ -141,22 +141,26 @@ class UNet(nn.Module):
 
         self.up.append(block)
 
-        self.conv_out = nn.Conv3d(self.ch,self.out_channels,kernel_size=3,stride=1,padding=1)
+        self.conv_out = nn.Conv2d(self.ch,self.out_channels,kernel_size=3,stride=1,padding=1)
 
 
-    def forward(self, input, part_masks):
+    def forward(self, input):
         nbatch = input.shape[0]
         grid = input.shape[-1]
+        n_part = input.shape[1] - 7
 
-        contacts = input[:, 0, :, :, :].reshape(nbatch, -1).type(torch.int32)
+        contacts = input[:, :6, :, :]
+        contacts = contacts.permute([0, 2, 3, 1]).reshape(-1, 6)
         contacts = self.embedding_contact(contacts)
-        h = contacts.shape[-1]
-        contacts = contacts.reshape(nbatch, grid, grid, grid, h)
-        contacts = contacts.permute([0, 4, 1, 2, 3])
+        h = contacts.shape[1]
+        contacts = contacts.reshape(nbatch, grid, grid, h)
+        contacts = contacts.permute([0, 3, 1, 2])
 
-        states = input[:, 1, :, :, :].reshape(nbatch, -1).type(torch.int32)
-        states = self.embedding_part_state(states).reshape(nbatch, grid, grid, grid, h)
-        states = states.permute([0, 4, 1, 2, 3])
+        states = input[:, 6, :, :].reshape(nbatch, -1).type(torch.int32)
+        states = self.embedding_part_state(states).reshape(nbatch, grid, grid, h)
+        states = states.permute([0, 3, 1, 2])
+
+        part_mask = input[:, 7:, :, :].reshape(nbatch, n_part, -1)
 
         x = torch.concatenate([contacts, states], axis = 1)
 
@@ -187,33 +191,31 @@ class UNet(nn.Module):
 
         x = self.conv_out(x)
         x = x.reshape(nbatch, self.out_channels, -1)
-        n_part = part_masks.shape[0]
-        mask = part_masks.reshape(n_part, -1)
-        ac = torch.einsum('bck, pk -> bcp', x, mask).reshape(nbatch, -1)
+        ac = torch.einsum('bck, bpk -> bcp', x, part_mask).reshape(nbatch, -1)
         ac = torch.softmax(ac, dim = -1)
         return ac, v
 
 
-class UNetPolicy(nn.Module):
+class UNetPolicy2D(nn.Module):
     def __init__(self, settings):
-        super(UNetPolicy, self).__init__()
+        super(UNetPolicy2D, self).__init__()
         policy_config = update_default_settings(settings,
                                                 'policy',
                                                 {
                                                     "unet_grid": 16,
-                                                    "unet_hidden_dims": 16,
+                                                    "unet_hidden_dims": 32,
                                                 })
 
 
         policy_config = SimpleNamespace(**policy_config)
 
-        self.actor = UNet(2, policy_config.unet_hidden_dims, policy_config.unet_grid, 3, 1)
+        self.actor = UNet2D(2, policy_config.unet_hidden_dims, policy_config.unet_grid, 3, 1)
         self.actor.apply(weights_init_kaiming)
         self.mask_prob = 1E-9
 
-    def act(self, state, part_masks, action_mask, deterministic=False):
-        action_probs, state_val = self.actor(state, part_masks)
-        action_probs = action_mask * action_probs + self.mask_prob
+    def act(self, state, mask, deterministic=False):
+        action_probs, state_val = self.actor(state)
+        action_probs = mask * action_probs + self.mask_prob
         dist = Categorical(action_probs)
         if deterministic:
             action = torch.argmax(dist.probs, dim=-1)
@@ -222,8 +224,8 @@ class UNetPolicy(nn.Module):
         action_logprob = dist.log_prob(action)
         return action.detach(), action_logprob.detach(), state_val.detach()
 
-    def evaluate(self, state, part_masks, action, mask):
-        action_probs, state_values = self.actor(state, part_masks)
+    def evaluate(self, state, action, mask):
+        action_probs, state_values = self.actor(state)
         action_probs = mask * action_probs + self.mask_prob
         dist = Categorical(action_probs)
         action_logprobs = dist.log_prob(action)
@@ -244,17 +246,11 @@ if __name__ == "__main__":
     np.random.seed(100)
 
     nbatch = 1024
-    n_part, nx, ny, nz = part_masks.shape
-    grid = 16
     part_states = np.random.randint(low=0, high=3, size=(nbatch, len(parts)), dtype=np.int32)
-
-    voxel_feats = get_voxel_features(part_states, part_masks, contact_masks)
-
-    pad_part_masks = torch.zeros((n_part, grid, grid, grid), device='cuda', dtype=floatType)
-    pad_part_masks[:, :nx, :ny, :nz] = part_masks
-
+    voxel_feats = get_voxel_features(part_states, part_masks, contact_masks, 16, 2)
+    print(voxel_feats.shape)
     start = time.perf_counter()
-    A2C = UNetPolicy(default_settings).to(device)
+    A2C = UNetPolicy2D(default_settings).to(device)
     action_masks = torch.ones((nbatch, len(parts) * 2), device=device, dtype=bool)
-    a, alp, v = A2C.act(voxel_feats, pad_part_masks, action_masks)
+    a, alp, v = A2C.act(voxel_feats, action_masks)
     print("policy inference:\t", time.perf_counter() - start)

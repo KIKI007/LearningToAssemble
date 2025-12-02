@@ -34,7 +34,7 @@ class RolloutDataset(torch_geometric.data.Dataset):
             return 0
 
     def add_states(self, states):
-        self.states = states
+        self.states = torch.stack(states)
         self.nstates = len(states)
 
     def batch_data_from_to(self, idx_start, idx_end):
@@ -42,8 +42,7 @@ class RolloutDataset(torch_geometric.data.Dataset):
             self.perm_inds = torch.arrange(0, self.nstates).to('cpu', dtype=intType)
         sub_inds = self.perm_inds[idx_start:idx_end]
         with torch.cuda.stream(self.tos):
-            return (torch_geometric.data.Batch.from_data_list([self.states[ind] for ind in sub_inds]).to(device,
-                                                                                                         non_blocking=True),
+            return (torch.index_select(self.states, 0, sub_inds).to(device, non_blocking=True),
                     torch.index_select(self.actions, 0, sub_inds).to(device, non_blocking=True),
                     torch.index_select(self.masks, 0, sub_inds).to(device, non_blocking=True),
                     torch.index_select(self.logprobs, 0, sub_inds).to(device, non_blocking=True),

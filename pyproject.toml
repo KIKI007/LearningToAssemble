@@ -17,7 +17,7 @@ dependencies = [
     "pytest",
     "wandb",
     "warp-lang",
-    "numba"
+    "rtree"
 ]
 
 description = "A package for conducting research using robots for assembly"

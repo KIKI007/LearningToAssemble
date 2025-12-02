@@ -72,8 +72,10 @@ def compute_accuracy(env, state_dict, settings, deterministic: bool = True, queu
     ppo_agent.policy.load_state_dict(state_dict)
     ppo_agent.deterministic = deterministic
     ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
-    num_of_sample = min(env.num_rollouts, env.curriculum.shape[0])
-    ppo_agent.buffer.curriculum_inds = np.random.choice(env.curriculum.shape[0], size=num_of_sample, replace=False)
+    if env.curriculum.shape[0] > env.num_rollouts:
+        ppo_agent.buffer.curriculum_inds = np.random.choice(env.curriculum.shape[0], size=env.num_rollouts, replace=False)
+    else:
+        ppo_agent.buffer.curriculum_inds = np.random.choice(env.curriculum.shape[0], size=env.num_rollouts, replace=True)
     ppo_agent.buffer.rewards = training_rollout(ppo_agent,
                                                 env,
                                                 ppo_agent.buffer.curriculum_inds,
@@ -183,8 +185,9 @@ def train(parts: list[Trimesh],
     saved_model_path = f"{folder_path}/{training_settings.policy_name}.pol"
 
     # forward curriculum
-    _, _, curriculum = forward_curriculum(parts, contacts, table_insertion=env.table_insertion, table_grasp=env.table_grasp, settings=settings)
-    env.set_curriculum(curriculum)
+    if settings['curriculum']['n_beam'] > 0:
+        _, _, curriculum = forward_curriculum(parts, contacts, table_insertion=env.table_insertion, table_grasp=env.table_grasp, settings=settings)
+        env.set_curriculum(curriculum)
     ppo_agent.buffer.reset_curriculum(env.curriculum.shape[0])
 
     print(f"Start training, curriculum: {env.curriculum.shape[0]}")

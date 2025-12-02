@@ -12,11 +12,12 @@ from trimesh import Trimesh
 from time import perf_counter
 
 from learn2assemble import update_default_settings
-from learn2assemble.graph import GFTFGraphConstructor
-from learn2assemble.policy import ActorCriticGATG
+from learn2assemble.policy2d import UNetPolicy2D
+from learn2assemble.policy import UNetPolicy
+
 from learn2assemble.buffer import RolloutBuffer
 from learn2assemble.env import DisassemblyEnv, Timer
-from learn2assemble.curriculum import forward_curriculum
+from learn2assemble.voxel import create_voxel_masks, get_voxel_features
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 floatType = torch.float32
@@ -46,7 +47,6 @@ class PPO:
                                              })
         n_robot = settings["env"]["n_robot"]
         ppo_config = SimpleNamespace(**ppo_config)
-        self.graph_constructor = GFTFGraphConstructor(parts, contacts)
 
         self.accuracy_of_sample_curriculum = 0
         self.accuracy_of_entire_curriculum = 0
@@ -64,7 +64,23 @@ class PPO:
                                     per_beta=ppo_config.per_beta,
                                     per_num_anneal=ppo_config.per_num_anneal)
 
-        self.policy = ActorCriticGATG(len(parts), settings).to(device)
+        self.use_policy_2d = False
+        self.part_masks, self.contact_masks = create_voxel_masks(parts, 0.25)
+        n_part, nx, ny, nz = self.part_masks.shape
+
+        if self.use_policy_2d:
+            self.policy = UNetPolicy2D(settings).to(device)
+            self.policy_old = UNetPolicy2D(settings).to(device)
+            self.grid = int(np.power(2, np.ceil(np.maximum(np.log2(ny), np.log2(nz)))))
+            self.pad_part_masks = torch.zeros((n_part, self.grid, self.grid), device='cuda', dtype=floatType)
+            self.pad_part_masks[:, :nx, :ny] = self.part_masks
+        else:
+            self.policy = UNetPolicy(settings).to(device)
+            self.policy_old = UNetPolicy(settings).to(device)
+            self.grid = int(np.power(2, np.ceil(np.maximum(np.log2(ny), np.maximum(np.log2(ny), np.log2(nz))))))
+            self.pad_part_masks = torch.zeros((n_part, self.grid, self.grid, self.grid), device='cuda', dtype=floatType)
+            self.pad_part_masks[:, :nx, :ny, :nz] = self.part_masks
+
         self.optimizer_params = {
             'params': self.policy.actor.parameters(),
             'lr': ppo_config.lr_actor,
@@ -75,31 +91,32 @@ class PPO:
         self.MseLoss = nn.MSELoss(reduction='none')
         self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=ppo_config.lr_milestones)
 
-        self.policy_old = ActorCriticGATG(len(parts), settings).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
     def select_action(self,
                       part_states: np.ndarray,
-                      masks: np.ndarray,
+                      action_masks: np.ndarray,
                       env_inds: np.ndarray):
         # build graphs
         self.timer.start("graph")
-        masks = torch.tensor(masks, dtype=floatType, device=device)
-        graphs = self.graph_constructor.graphs(part_states)
-        # to batch graphs
-        batch_graph = torch_geometric.data.Batch.from_data_list(graphs).to(device)
+        action_masks = torch.tensor(action_masks, dtype=floatType, device=device)
+        if self.use_policy_2d:
+            voxel_feats = get_voxel_features(part_states, self.part_masks, self.contact_masks, grid = self.grid, dim = 2)
+        else:
+            voxel_feats = get_voxel_features(part_states, self.part_masks, self.contact_masks, grid= self.grid, dim=3)
+
         self.timer.stop("graph")
 
         self.timer.start("inference")
         # inference
         self.policy_old.eval()
         with torch.no_grad():
-            action, action_logprob, state_val = self.policy_old.act(batch_graph, masks, self.deterministic)
+            action, action_logprob, state_val = self.policy_old.act(voxel_feats, self.pad_part_masks, action_masks, self.deterministic)
         self.timer.stop("inference")
 
         # add to buffer
         namelist = ['states', 'actions', 'logprobs', "state_values", "masks"]
-        variables = [graphs, action, action_logprob, state_val, masks]
+        variables = [voxel_feats, action, action_logprob, state_val, action_masks]
         for id, name in enumerate(namelist):
             self.buffer.add(name, variables[id], env_inds)
 
@@ -170,7 +187,7 @@ class PPO:
 
         # Evaluating old actions and values
         batch_percentage = float(old_actions.shape[0]) / nstates
-        logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_actions, old_masks)
+        logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, self.pad_part_masks, old_actions, old_masks)
 
         # match state_values tensor dimensions with rewards tensor
         state_values = torch.squeeze(state_values).reshape(-1)

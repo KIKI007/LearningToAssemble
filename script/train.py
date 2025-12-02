@@ -42,10 +42,10 @@ if __name__ == "__main__":
         default_settings["training"]["policy_update_batch_size"] = 1024
         default_settings["env"]["num_rollouts"] = 1024
     elif memory_GB < 48:
-        default_settings["training"]["policy_update_batch_size"] = 2048
+        default_settings["training"]["policy_update_batch_size"] = 1024
         default_settings["env"]["num_rollouts"] = 1024
     elif memory_GB > 75:
-        default_settings["training"]["policy_update_batch_size"] = 4096
+        default_settings["training"]["policy_update_batch_size"] = 1024
         default_settings["env"]["num_rollouts"] = 1024
     default_settings["curriculum"]["verbose"] = True
     if args.wandb:

@@ -92,7 +92,7 @@ default_settings = settings = {
         "max_entropy_weight": 0.01,
 
         "lr_milestones": [100, 300],
-        "lr_actor": 1e-4,
+        "lr_actor": 1e-5,
         "betas_actor": [0.95, 0.999],
 
         "per_alpha": 0.8,
@@ -103,7 +103,7 @@ default_settings = settings = {
         "max_train_epochs": 5000,
         "save_epochs": 5,
         "print_epochs": 1,
-        "policy_update_batch_size": 1024,
+        "policy_update_batch_size": 256,
         "K_epochs": 5,
         "policy_name": "example",
         "num_render_debug": 4 * 4,

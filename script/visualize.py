@@ -56,7 +56,7 @@ if __name__ == "__main__":
     # single forward curriculum (training)
     torch_geometric.seed.seed_everything(default_settings["env"]["seed"])
     env.num_rollouts = env.curriculum.shape[0]
-    # env.curriculum = env.curriculum.repeat(8, axis = 0)
+    env.curriculum = env.curriculum.repeat(8, axis = 0)
 
     ppo_agent = PPO(env.parts, env.contacts, default_settings)
     ppo_agent.policy_old.load_state_dict(state_dict)
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     env.simulate_buffer(simulate_remain=True)
     _, rewards = ppo_agent.buffer.get_valid_env_inds(env)
     print(rewards)
-    sequence = np.vstack(ppo_agent.buffer.next_states[0][::-1])
+    sequence = np.vstack(ppo_agent.buffer.next_states[7][::-1])
 
     init_polyscope()
     render_sequence(parts, sequence, default_settings)

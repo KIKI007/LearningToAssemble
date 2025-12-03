@@ -1,5 +1,9 @@
+import os.path
+
 import numpy as np
 import warnings
+
+import torch
 from scipy.cluster.vq import kmeans2
 from trimesh import Trimesh
 import learn2assemble.simulator
@@ -138,6 +142,34 @@ def compute_solution(records):
     return np.array(part_states, dtype=np.int32)
 
 
+def compute_policy_labels(current_states, prev_states):
+    n_part = current_states.shape[1]
+    policy_labels = np.zeros((current_states.shape[0], 2 * n_part), dtype=int)
+
+    # hold
+    for part_id in range(n_part):
+        update_current_states = np.copy(current_states)
+        update_current_states[:, part_id] = 2
+        x = np.arange(current_states.shape[0])
+        y = np.arange(prev_states.shape[0])
+        xv, yv = np.meshgrid(x, y, indexing='ij')
+        diff = np.linalg.norm(update_current_states[xv, :] - prev_states[yv, :], axis = 2)
+        flag = (diff < 1E-6).any(axis = 1)
+        policy_labels[:, part_id] = np.logical_and(flag, current_states[:, part_id] == 1)
+
+    # remove
+    for part_id in range(n_part):
+        update_current_states = np.copy(current_states)
+        update_current_states[:, part_id] = 0
+        x = np.arange(current_states.shape[0])
+        y = np.arange(prev_states.shape[0])
+        xv, yv = np.meshgrid(x, y, indexing='ij')
+        diff = np.linalg.norm(update_current_states[xv, :] - prev_states[yv, :], axis = 2)
+        flag = (diff < 1E-6).any(axis = 1)
+        policy_labels[:, n_part + part_id] = np.logical_and(flag, current_states[:, part_id] == 2)
+
+    return policy_labels
+
 def forward_curriculum(parts: list[Trimesh],
                        contacts: list[dict],
                        table_insertion = None,
@@ -149,10 +181,11 @@ def forward_curriculum(parts: list[Trimesh],
     boundary_part_ids = env.get("boundary_part_ids", [])
     n_robot = env.get("n_robot", 2)
 
-    curriculum_settings = update_default_settings(settings, "curriculum", {"n_beam": 64, "verbose": False})
+    curriculum_settings = update_default_settings(settings, "curriculum", {"n_beam": 64, "verbose": False, "n_sim_batch": 512})
 
     n_beam = curriculum_settings["n_beam"]
     verbose = curriculum_settings["verbose"]
+    n_sim_batch =  curriculum_settings["n_sim_batch"]
 
     # init states
     part_states = np.zeros((1, len(parts)), dtype=np.int32)
@@ -166,6 +199,11 @@ def forward_curriculum(parts: list[Trimesh],
         "prev_inds": [],
     }
 
+    policy_dataset = {
+        "input":  [],
+        "output": []
+    }
+
     while (part_states.shape[0] > 0 and not check_terminate(part_states, boundary_part_ids).any()):
         iter += 1
 
@@ -176,8 +214,14 @@ def forward_curriculum(parts: list[Trimesh],
 
         if release_states.shape[0] > 0:
             timer = time.perf_counter()
-            _, stability_flag = learn2assemble.simulator.simulate(parts, contacts, release_states, settings)
             n_sim = release_states.shape[0]
+            stability_flag = np.zeros(n_sim, dtype=bool)
+            batch_ind = 0
+            while batch_ind < n_sim:
+                inds = np.arange(batch_ind, min(n_sim, batch_ind + n_sim_batch))
+                _, stability_flag[inds] = learn2assemble.simulator.simulate(parts, contacts, release_states[inds, :], settings)
+                batch_ind += n_sim_batch
+
             if verbose:
                 print("step:\t", iter,
                       ",\t sim:\t", f"{np.sum(stability_flag)}/{n_sim}",
@@ -208,12 +252,17 @@ def forward_curriculum(parts: list[Trimesh],
             new_states = np.vstack(new_states)
             prev_inds = np.hstack(prev_inds)
 
+            # add into dataset
+            policy_dataset['input'].append(np.copy(new_states))
+            policy_dataset['output'].append(compute_policy_labels(new_states, part_states))
+
             new_states, prev_inds = cluster(new_states, prev_inds, n_beam)
             records["part_states"].append(new_states.copy())
             records["prev_inds"].append(prev_inds.copy())
             curriculum.append(new_states)
+
         else:
-            return False, compute_solution(records), np.vstack(curriculum)
+            return False, compute_solution(records), np.vstack(curriculum), policy_dataset
 
         part_states = new_states.copy()
 
@@ -225,21 +274,21 @@ def forward_curriculum(parts: list[Trimesh],
     complete_state = np.ones(len(parts), dtype=np.int32)
     complete_state[boundary_part_ids] = 2
     curriculum.append(complete_state)
-    return True, compute_solution(records), np.vstack(curriculum)
+    return True, compute_solution(records), np.vstack(curriculum), policy_dataset
 
 
 if __name__ == '__main__':
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings, RESOURCE_DIR
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     from learn2assemble.render import render_sequence, init_polyscope
     import polyscope as ps
     import polyscope.imgui as psim
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-8")
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     default_settings['curriculum']['verbose'] = True
     default_settings['rbe']['mu'] = 0.2
     default_settings["assembly"]["contact_shrink_ratio"] = 0.1 # for robustnessly computing the contact surfaces
-    default_settings['curriculum']['n_beam'] = 64
+    default_settings['curriculum']['n_beam'] = 128
 
     # debug
     #parts.remove(parts[3]) # for tetris-7
@@ -248,8 +297,16 @@ if __name__ == '__main__':
     contacts = compute_assembly_contacts(parts, default_settings)
     table_insertion, drts = compute_insertion_table(parts, default_settings)
     table_grasp, grasp_frames, _ = compute_grasp_table(parts, default_settings)
-    succeed, solution, curriculum = forward_curriculum(parts, contacts, table_insertion, table_grasp, default_settings)
+    succeed, solution, curriculum, policy_dataset = forward_curriculum(parts, contacts, table_insertion, table_grasp, default_settings)
     print("succeed:\t", succeed)
+
+    filename = os.path.join(RESOURCE_DIR, "curriculum/tetris-1.pt")
+
+    input = np.vstack(policy_dataset['input'])
+    policy_dataset['input'] = torch.tensor(input, dtype=torch.int32, device="cpu")
+    output = np.vstack(policy_dataset['output'])
+    policy_dataset['output'] = torch.tensor(output, dtype=torch.int32, device="cpu")
+    torch.save(policy_dataset, filename)
 
     init_polyscope()
     render_sequence(parts, solution, default_settings)

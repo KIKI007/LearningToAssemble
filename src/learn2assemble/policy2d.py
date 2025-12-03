@@ -92,7 +92,7 @@ class UNet2D(nn.Module):
         self.num_blocks = num_blocks
         self.ac = nn.LeakyReLU()
 
-        self.embedding_contact = torch.nn.Linear(6, self.ch // 2)
+        self.embedding_contact = torch.nn.Embedding(64, self.ch // 2)
         self.embedding_part_state = torch.nn.Embedding(4, self.ch // 2)
 
         self.down = nn.ModuleList()
@@ -144,23 +144,19 @@ class UNet2D(nn.Module):
         self.conv_out = nn.Conv2d(self.ch,self.out_channels,kernel_size=3,stride=1,padding=1)
 
 
-    def forward(self, input):
+    def forward(self, input, part_masks):
         nbatch = input.shape[0]
         grid = input.shape[-1]
-        n_part = input.shape[1] - 7
 
-        contacts = input[:, :6, :, :]
-        contacts = contacts.permute([0, 2, 3, 1]).reshape(-1, 6)
+        contacts = input[:, 0, :, :].reshape(nbatch, -1).type(torch.int32)
         contacts = self.embedding_contact(contacts)
-        h = contacts.shape[1]
+        h = contacts.shape[-1]
         contacts = contacts.reshape(nbatch, grid, grid, h)
         contacts = contacts.permute([0, 3, 1, 2])
 
-        states = input[:, 6, :, :].reshape(nbatch, -1).type(torch.int32)
+        states = input[:, 1, :, :].reshape(nbatch, -1).type(torch.int32)
         states = self.embedding_part_state(states).reshape(nbatch, grid, grid, h)
         states = states.permute([0, 3, 1, 2])
-
-        part_mask = input[:, 7:, :, :].reshape(nbatch, n_part, -1)
 
         x = torch.concatenate([contacts, states], axis = 1)
 
@@ -191,8 +187,10 @@ class UNet2D(nn.Module):
 
         x = self.conv_out(x)
         x = x.reshape(nbatch, self.out_channels, -1)
-        ac = torch.einsum('bck, bpk -> bcp', x, part_mask).reshape(nbatch, -1)
-        ac = torch.softmax(ac, dim = -1)
+        n_part = part_masks.shape[0]
+        mask = part_masks.reshape(n_part, -1)
+        ac = torch.einsum('bck, pk -> bcp', x, mask).reshape(nbatch, -1)
+        ac = torch.softmax(ac, dim=-1)
         return ac, v
 
 
@@ -203,7 +201,7 @@ class UNetPolicy2D(nn.Module):
                                                 'policy',
                                                 {
                                                     "unet_grid": 16,
-                                                    "unet_hidden_dims": 32,
+                                                    "unet_hidden_dims": 16,
                                                 })
 
 
@@ -213,9 +211,9 @@ class UNetPolicy2D(nn.Module):
         self.actor.apply(weights_init_kaiming)
         self.mask_prob = 1E-9
 
-    def act(self, state, mask, deterministic=False):
-        action_probs, state_val = self.actor(state)
-        action_probs = mask * action_probs + self.mask_prob
+    def act(self, state, part_masks, action_mask, deterministic=False):
+        action_probs, state_val = self.actor(state, part_masks)
+        action_probs = action_mask * action_probs + self.mask_prob
         dist = Categorical(action_probs)
         if deterministic:
             action = torch.argmax(dist.probs, dim=-1)
@@ -224,8 +222,8 @@ class UNetPolicy2D(nn.Module):
         action_logprob = dist.log_prob(action)
         return action.detach(), action_logprob.detach(), state_val.detach()
 
-    def evaluate(self, state, action, mask):
-        action_probs, state_values = self.actor(state)
+    def evaluate(self, state, part_masks, action, mask):
+        action_probs, state_values = self.actor(state, part_masks)
         action_probs = mask * action_probs + self.mask_prob
         dist = Categorical(action_probs)
         action_logprobs = dist.log_prob(action)
@@ -235,22 +233,51 @@ class UNetPolicy2D(nn.Module):
 
 if __name__ == "__main__":
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings
-    from learn2assemble.voxel import create_voxel_masks, get_voxel_features
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR,RESOURCE_DIR, update_default_settings, default_settings
+    from learn2assemble.voxel import create_voxel_masks, get_voxel_features_2d
     import numpy as np
     import time
+    import os
+    import torch
+    from torch.utils.data import TensorDataset, DataLoader
 
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
     part_masks, contact_masks = create_voxel_masks(parts, 0.25)
 
-    np.random.seed(100)
+    grid = 16
 
-    nbatch = 1024
-    part_states = np.random.randint(low=0, high=3, size=(nbatch, len(parts)), dtype=np.int32)
-    voxel_feats = get_voxel_features(part_states, part_masks, contact_masks, 16, 2)
-    print(voxel_feats.shape)
-    start = time.perf_counter()
-    A2C = UNetPolicy2D(default_settings).to(device)
-    action_masks = torch.ones((nbatch, len(parts) * 2), device=device, dtype=bool)
-    a, alp, v = A2C.act(voxel_feats, action_masks)
-    print("policy inference:\t", time.perf_counter() - start)
+    filename = os.path.join(RESOURCE_DIR, "curriculum/tetris-1.pt")
+    policy_dataset = torch.load(filename)
+    part_states = policy_dataset['input']
+
+    dataset = TensorDataset(policy_dataset['input'].to('cuda'), policy_dataset['output'].to('cuda').type(torch.float32))
+    dataloader = DataLoader(dataset, batch_size=512, shuffle=True)
+
+    model = UNet2D(2, 16, grid, 3, 1).to('cuda')
+
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    print("num_data", len(dataset))
+
+    for epoch in range(1000):
+        for data in dataloader:
+            start = time.perf_counter()
+            part_states = data[0].cpu().numpy()
+
+            nbatch = part_states.shape[0]
+            voxel_feats = get_voxel_features_2d(part_states, part_masks, contact_masks, grid)
+
+            n_part, nx, ny, nz = part_masks.shape
+            action_masks = torch.ones((nbatch, n_part * 2), device=device, dtype=bool)
+
+            pad_part_masks = torch.zeros((n_part, grid, grid), device='cuda', dtype=floatType)
+            pad_part_masks[:, :nx, :nz] = part_masks.squeeze(2)
+
+            a, v = model(voxel_feats, pad_part_masks)
+
+            optimizer.zero_grad()
+            loss = criterion(a, data[1])
+            loss.backward()
+            optimizer.step()
+            print(loss.item())

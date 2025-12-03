@@ -96,9 +96,35 @@ def draw_voxel_meshes(voxel_feat: np.ndarray, part_masks: np.ndarray, voxel_size
             ps.register_curve_network(f"edge_{part_id}", nodes=lines, edges=edges, color = (0, 0, 0))
 
 def get_voxel_features_2d(part_states: np.ndarray, part_masks: torch.tensor, contact_masks: torch.tensor, grid = 16):
-    pass
+    nbatch = part_states.shape[0]
+    npart, nx, _, nz = part_masks.shape
 
-def get_voxel_features(part_states: np.ndarray, part_masks: torch.tensor, contact_masks: torch.tensor, grid = 16, dim = 3):
+    # contact features
+    part_states = torch.tensor(part_states, device='cuda', dtype=torch.float32)
+    flag = torch.einsum('cijk, bc -> bijk', part_masks, part_states)
+    contact_feat = contact_masks[None, :].repeat_interleave(nbatch, dim=0)
+    flag = flag[:, None, :, :].repeat_interleave(6, dim=1)
+    contact_feat = ((contact_feat * flag) > 0).type(floatType)
+    pw = torch.tensor([1, 2, 4, 8, 16, 32], dtype=floatType, device=device)
+    contact_feat = torch.einsum('bcijk, c -> bijk', contact_feat, pw).unsqueeze(1)
+
+    # voxel features
+    state = part_states[:, :, None, None, None]
+    state = state.repeat_interleave(part_masks.shape[1], dim=2)
+    state = state.repeat_interleave(part_masks.shape[2], dim=3)
+    state = state.repeat_interleave(part_masks.shape[3], dim=4)
+    part_feats = part_masks[None, :].repeat_interleave(nbatch, dim=0)
+    voxel_state = part_feats * state
+    voxel_state = torch.sum(voxel_state, axis=1, keepdims=True)
+
+    feats = torch.concatenate([contact_feat, voxel_state], axis=1)
+    feats = feats.squeeze(3)
+    pad_feats = torch.zeros((nbatch, feats.shape[1], grid, grid), device='cuda', dtype=floatType)
+    pad_feats[:, :, :nx, :nz] = feats
+
+    return pad_feats
+
+def get_voxel_features(part_states: np.ndarray, part_masks: torch.tensor, contact_masks: torch.tensor, grid = 16):
     nbatch = part_states.shape[0]
     npart, nx, ny, nz = part_masks.shape
 

@@ -26,9 +26,9 @@ def init_ipm(parts: list[Trimesh],
                                    "ipm",
                                   {
                                        "max_iter": 30,
-                                       "conv_eps": 1E-4,
-                                       "pcg_eps": 1E-4,
-                                       "x_eps": 1E-3,
+                                       "conv_eps": 1E-9,
+                                       "pcg_eps": 1E-9,
+                                       "x_eps": 1E-5,
                                        "float_type": torch.float64,
                                    })
     float_type = ipm['float_type']
@@ -119,15 +119,11 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5):
     inds = torch.arange(b.shape[1], device=device, dtype=torch.long)
 
     k = 0
-    while inds.shape[0] > 0 and k < 100:
+    while inds.shape[0] > 0 and k < 50:
         Apk = GT @ (ZS * (G @ pk)) + Q @ pk
         ru = torch.sum(rk * uk, dim = 0)
         ak =  ru / torch.sum(pk * Apk, dim = 0)
         xk1 = xk + ak * pk
-
-        # if k % 16 == 15:
-        #     rk1 = b[:, inds] - (GT @ (ZS * (G @ xk1)) + Q @ xk1)
-        # else:
         rk1 = rk - ak * Apk
 
         uk1 = invM * rk1
@@ -218,7 +214,7 @@ def simulate_ipm(batch_part_states: list[dict],
         timer = perf_counter()
         r1, r2, r3, kkt_res = ipm_kkt_res(Q, q, h, G, GT, x, s, z)
         print("ipm_kkt_res", perf_counter() - timer)
-        print("kkt_res", torch.max(kkt_res, 0).values)
+        print("kkt_res", kkt_res)
 
         # remove converged
         flag = kkt_res > ipm.conv_eps
@@ -469,16 +465,16 @@ if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings, RESOURCE_DIR
     from learn2assemble.render import *
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    #import polyscope as ps
-    import os
-
-    #init_polyscope()
+    import polyscope as ps
+    # import os
+    #
+    # init_polyscope()
 
     # test
     default_settings['rbe']['mu'] = 0.5
     default_settings["assembly"]["contact_shrink_ratio"] = 0.0 # for robustnessly computing the contact surfaces
 
-    n_batch = 1
+    n_batch = 512
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
     part_states = np.ones((n_batch, len(parts)))
     # part_states[0, :] = 0
@@ -506,14 +502,14 @@ if __name__ == '__main__':
     print("avg time:\t", (perf_counter() - timer) / n_batch)
     print(np.sum(stable_fp32) / n_batch)
 
-    # t = 0
-    # def callback():
-    #     global t
-    #     changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
-    #     if changed:
-    #         draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-    #
-    #
+    t = 0
+    def callback():
+        global t
+        changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
+        if changed:
+            draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+
+
     # draw_contacts(contacts, part_states[0])
     # draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
     # ps.set_user_callback(callback)

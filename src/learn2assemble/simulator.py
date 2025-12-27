@@ -217,7 +217,7 @@ def simulate_ipm(batch_part_states: list[dict],
 
         timer = perf_counter()
         r1, r2, r3, kkt_res = ipm_kkt_res(Q, q, h, G, GT, x, s, z)
-        torch.cuda.synchronize()
+        #torch.cuda.synchronize()
         print("ipm_kkt_res", perf_counter() - timer)
         print("kkt_res", torch.max(kkt_res, 0).values)
 
@@ -233,13 +233,13 @@ def simulate_ipm(batch_part_states: list[dict],
         # update
         timer = perf_counter()
         dx_a, ds_a, dz_a = ipm_solve_rhs(Q, G, GT, s, z, invM, -r1, -r2, -r3, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
-        torch.cuda.synchronize()
+        #torch.cuda.synchronize()
         print("ipm_solve_rhs_1", perf_counter() - timer)
 
         timer = perf_counter()
         sigma, mu = centering_params(s, z, ds_a, dz_a)
         r2 = (sigma * mu - (ds_a * dz_a))
-        torch.cuda.synchronize()
+        #torch.cuda.synchronize()
         print("centering_params", perf_counter() - timer)
 
         timer = perf_counter()
@@ -249,7 +249,7 @@ def simulate_ipm(batch_part_states: list[dict],
         dz += dz_a
 
         alpha = 0.99 * linesearch(s, ds, z, dz)
-        torch.cuda.synchronize()
+        #torch.cuda.synchronize()
         print("ipm_solve_rhs_2", perf_counter() - timer)
         print("\n")
         x = x + alpha * dx

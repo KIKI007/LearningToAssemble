@@ -83,20 +83,21 @@ def ipm_kkt_res(Q, q, h, G, GT, x, s, z):
 
 def precond(diagQ, G, GT, s, z):
     ZS = z / s
-    # ZSG = torch.einsum('ib, ij -> bij', ZS, G.to_dense())
-    # invM = torch.einsum('ij, bji -> ib', G.T.to_dense(), ZSG)
-    # invM = invM + diagQ[:, None]
-    # invM = 1.0 / invM
     time = perf_counter()
-    nbatch = z.shape[1]
-    invM2 = torch.zeros(diagQ.shape[0], nbatch, device=s.device, dtype=s.dtype)
-    for i in range(nbatch):
-        ZSG = torch.einsum('i, ij -> ij', ZS[:, i], G)
-        GTZSG = torch.sum(G * ZSG, dim = 0).to_dense()
-        invM2[:, i] = 1.0 / (GTZSG + diagQ)
+    ZSG = torch.einsum('ib, ij -> bij', ZS, G.to_dense())
+    invM = torch.einsum('ij, bji -> ib', G.T.to_dense(), ZSG)
+    invM = invM + diagQ[:, None]
+    invM = 1.0 / invM
+
+    # nbatch = z.shape[1]
+    # invM2 = torch.zeros(diagQ.shape[0], nbatch, device=s.device, dtype=s.dtype)
+    # for i in range(nbatch):
+    #     ZSG = torch.einsum('i, ij -> ij', ZS[:, i], G)
+    #     GTZSG = torch.sum(G * ZSG, dim = 0).to_dense()
+    #     invM2[:, i] = 1.0 / (GTZSG + diagQ)
     #print(torch.linalg.norm(invM - invM2))
     print((perf_counter() - time) / 1024)
-    return invM2
+    return invM
 
 def inf_norm(x):
     return torch.max(torch.abs(x), dim=0).values

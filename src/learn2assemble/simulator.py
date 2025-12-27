@@ -26,11 +26,11 @@ def init_ipm(parts: list[Trimesh],
                                    "ipm",
                                   {
                                        "ipm_iter": 20,
-                                       "pcg_iter": 30,
+                                       "pcg_iter": 50,
                                        "conv_eps": 1E-3,
                                        "pcg_eps": 1E-9,
                                        "x_eps": 1E-7,
-                                       "float_type": torch.float32,
+                                       "float_type": torch.float64,
                                    })
     float_type = ipm['float_type']
     rbe = settings['rbe']
@@ -477,13 +477,13 @@ if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings, RESOURCE_DIR
     from learn2assemble.render import *
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    # import polyscope as ps
-    # import os
+    import polyscope as ps
+    import os
 
-    #init_polyscope()
+    init_polyscope()
 
     # test
-    #default_settings["rbe"]["density"] = 1E3
+    default_settings["rbe"]["density"] = 100
     default_settings['rbe']['mu'] = 0.5
     default_settings["assembly"]["contact_shrink_ratio"] = 0.0 # for robustnessly computing the contact surfaces
 
@@ -515,15 +515,15 @@ if __name__ == '__main__':
     print("avg time:\t", (perf_counter() - timer) / n_batch)
     print(np.sum(stable_fp32) / n_batch)
 
-    # t = 0
-    # def callback():
-    #     global t
-    #     changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
-    #     if changed:
-    #         draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-    #
+    t = 0
+    def callback():
+        global t
+        changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
+        if changed:
+            draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
 
-    # draw_contacts(contacts, part_states[0])
-    # draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-    # ps.set_user_callback(callback)
-    # ps.show()
+
+    draw_contacts(contacts, part_states[0])
+    draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    ps.set_user_callback(callback)
+    ps.show()

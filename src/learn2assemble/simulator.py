@@ -25,9 +25,9 @@ def init_ipm(parts: list[Trimesh],
     ipm = update_default_settings(settings,
                                    "ipm",
                                   {
-                                       "max_iter": 15,
+                                       "max_iter": 20,
                                        "conv_eps": 1E-9,
-                                       "pcg_eps": 1E-9,
+                                       "pcg_eps": 1E-6,
                                        "x_eps": 1E-5,
                                        "float_type": torch.float64,
                                    })
@@ -119,7 +119,7 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5):
     inds = torch.arange(b.shape[1], device=device, dtype=torch.long)
 
     k = 0
-    while inds.shape[0] > 0 and k < 100:
+    while inds.shape[0] > 0 and k < 50:
         Apk = GT @ (ZS * (G @ pk)) + Q @ pk
         ru = torch.sum(rk * uk, dim = 0)
         ak =  ru / torch.sum(pk * Apk, dim = 0)

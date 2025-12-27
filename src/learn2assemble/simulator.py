@@ -27,10 +27,10 @@ def init_ipm(parts: list[Trimesh],
                                   {
                                        "ipm_iter": 30,
                                        "pcg_iter": 50,
-                                       "conv_eps": 1E-5,
+                                       "conv_eps": 1E-3,
                                        "pcg_eps": 1E-9,
-                                       "x_eps": 1E-5,
-                                       "float_type": torch.float64,
+                                       "x_eps": 1E-7,
+                                       "float_type": torch.float32,
                                    })
     float_type = ipm['float_type']
     rbe = settings['rbe']
@@ -243,7 +243,7 @@ def simulate_ipm(batch_part_states: list[dict],
         print("centering_params", perf_counter() - timer)
 
         timer = perf_counter()
-        dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM, 0, r2, 0, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter / 2)
+        dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM, 0, r2, 0, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
         dx += dx_a
         ds += ds_a
         dz += dz_a
@@ -483,7 +483,7 @@ if __name__ == '__main__':
     #init_polyscope()
 
     # test
-    default_settings["rbe"]["density"] = 1E3
+    #default_settings["rbe"]["density"] = 1E3
     default_settings['rbe']['mu'] = 0.5
     default_settings["assembly"]["contact_shrink_ratio"] = 0.0 # for robustnessly computing the contact surfaces
 
@@ -505,7 +505,7 @@ if __name__ == '__main__':
 
     # part_states = part_states[:n_batch, :]
 
-    default_settings['rbe']['Ccp'] = 1000
+    default_settings['rbe']['Ccp'] = 100
     default_settings.pop('admm', None)
     #default_settings['gurobi'] = {}
     default_settings['ipm'] = {}

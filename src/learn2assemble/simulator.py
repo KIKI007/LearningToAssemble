@@ -1,4 +1,6 @@
 import math
+from time import perf_counter
+
 import scipy as sp
 from trimesh import Trimesh
 import torch
@@ -120,10 +122,10 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5):
         ak =  ru / torch.sum(pk * Apk, dim = 0)
         xk1 = xk + ak * pk
 
-        if k % 16 == 15:
-            rk1 = b[:, inds] - (GT @ (ZS * (G @ xk1)) + Q @ xk1)
-        else:
-            rk1 = rk - ak * Apk
+        # if k % 16 == 15:
+        #     rk1 = b[:, inds] - (GT @ (ZS * (G @ xk1)) + Q @ xk1)
+        # else:
+        rk1 = rk - ak * Apk
 
         uk1 = invM * rk1
 
@@ -139,14 +141,14 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5):
         ZS, invM = ZS[:, flag], invM[:, flag]
         k = k + 1
 
-    Axb = (GT @ ((z / s) * (G @ dx)) + Q @ dx - b)
-    print('solve in \t', k, " steps ,\t res = ", torch.max(inf_norm(Axb), 0).values)
+    #Axb = (GT @ ((z / s) * (G @ dx)) + Q @ dx - b)
+    #print('solve in \t', k, " steps ,\t res = ", torch.max(inf_norm(Axb), 0).values)
 
     ds = v3 - G @ dx
     dz = (v2 - z * ds) / s
     return dx, ds, dz
 
-def linesearch(s, ds, z, dz, nsample = 1024):
+def linesearch(s, ds, z, dz, nsample = 128):
     """maximum alpha <= 1 st x + alpha * dx >= 0"""
     alpha = torch.linspace(0, 1, nsample, device=device, dtype=s.dtype)
     ls = s[None, :] + torch.einsum('i, jk -> ijk', alpha, ds)
@@ -207,7 +209,7 @@ def simulate_ipm(batch_part_states: list[dict],
 
         invM = precond(diagQ, denseG, s, z)
         r1, r2, r3, kkt_res = ipm_kkt_res(Q, q, h, G, GT, x, s, z)
-        print("kkt_res", kkt_res)
+        #print("kkt_res", kkt_res)
 
         # remove converged
         flag = kkt_res > ipm.conv_eps
@@ -466,11 +468,13 @@ if __name__ == '__main__':
     part_states[:, 0] = 2
 
     # test dataset
+
     torch.manual_seed(0)
     filename = os.path.join(RESOURCE_DIR, "curriculum/tetris-1.pt")
     part_states = torch.load(filename)['input']
     part_states = part_states[torch.randperm(part_states.shape[0]), :]
-    n_batch = 512
+    print(part_states.shape)
+    n_batch = 1024
     part_states = part_states[:n_batch, :]
 
     default_settings['rbe']['Ccp'] = 100
@@ -478,7 +482,9 @@ if __name__ == '__main__':
     default_settings.pop('admm', None)
     default_settings['ipm'] = {}
     contacts = compute_assembly_contacts(parts, default_settings)
+    timer = perf_counter()
     v_fp32, stable_fp32 = simulate(parts, contacts, part_states, default_settings)
+    print("avg time:\t", (perf_counter() - timer) / n_batch)
     print(np.sum(stable_fp32))
     print(np.sum(stable_fp32) / n_batch)
     # t = 0

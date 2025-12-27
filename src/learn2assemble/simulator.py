@@ -81,22 +81,23 @@ def ipm_kkt_res(Q, q, h, G, GT, x, s, z):
 
     return r1, r2, r3, kkt_res
 
-def precond(diagQ, G, GT, s, z):
+def precond(diagQ, GG, s, z):
     ZS = z / s
-    # ZSG = torch.einsum('ib, ij -> bij', ZS, G)
-    # invM = torch.einsum('ij, bji -> ib', G.T, ZSG)
-    # invM = invM + diagQ[:, None]
-    # invM = 1.0 / invM
+    #GG = (G * G).to_dense()
+    GTZSG = torch.einsum("ji, jb -> ib", GG, ZS)
+    #ZSG = torch.einsum('ib, ij -> bij', ZS, G)
+    #GTZSG = torch.einsum('ij, bji -> ib', G.T, ZSG)
+    invM = GTZSG + diagQ[:, None]
+    invM = 1.0 / invM
 
-    nbatch = z.shape[1]
-    invM2 = torch.zeros(diagQ.shape[0], nbatch, device=s.device, dtype=s.dtype)
-    for i in range(nbatch):
-        ZSG = torch.einsum('i, ij -> ij', ZS[:, i], G)
-        GTZSG = torch.sum(G * ZSG, dim = 0).to_dense()
-        invM2[:, i] = 1.0 / (GTZSG + diagQ)
-    #print(torch.linalg.norm(invM - invM2))
-    # print((perf_counter() - time) / 1024)
-    return invM2
+    # nbatch = z.shape[1]
+    # invM2 = torch.zeros(diagQ.shape[0], nbatch, device=s.device, dtype=s.dtype)
+    # for i in range(nbatch):
+    #     ZSG = torch.einsum('i, ij -> ij', ZS[:, i], G)
+    #     GTZSG = torch.sum(G * ZSG, dim = 0).to_dense()
+    #     invM2[:, i] = 1.0 / (GTZSG + diagQ)
+    # print(torch.linalg.norm(invM - invM2))
+    return invM
 
 def inf_norm(x):
     return torch.max(torch.abs(x), dim=0).values
@@ -197,6 +198,7 @@ def simulate_ipm(batch_part_states: list[dict],
     invH = ipm.invH
     G = ipm.G
     denseG = ipm.denseG
+    GG = denseG * denseG
     GT = ipm.GT
     Q = ipm.Q
     diagQ = ipm.diagQ
@@ -210,7 +212,7 @@ def simulate_ipm(batch_part_states: list[dict],
     while it < ipm.max_iter:
 
         timer = perf_counter()
-        invM = precond(diagQ, G, GT, s, z)
+        invM = precond(diagQ, GG, s, z)
         print("precond", perf_counter() - timer)
 
         timer = perf_counter()

@@ -280,27 +280,30 @@ def forward_curriculum(parts: list[Trimesh],
 if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, update_default_settings, default_settings, RESOURCE_DIR
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    from learn2assemble.render import render_sequence, init_polyscope
-    import polyscope as ps
-    import polyscope.imgui as psim
+    # from learn2assemble.render import render_sequence, init_polyscope
+    # import polyscope as ps
+    # import polyscope.imgui as psim
 
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
     default_settings['curriculum']['verbose'] = True
-    default_settings['rbe']['mu'] = 0.2
-    default_settings["assembly"]["contact_shrink_ratio"] = 0.1 # for robustnessly computing the contact surfaces
+    default_settings['rbe']['mu'] = 0.5
+    default_settings["assembly"]["contact_shrink_ratio"] = 0.0 # for robustnessly computing the contact surfaces
     default_settings['curriculum']['n_beam'] = 128
+    default_settings.pop('admm')
+    default_settings['ipm'] = {}
+    default_settings["env"]["boundary_part_ids"] = [len(parts) - 1]
 
     # debug
     #parts.remove(parts[3]) # for tetris-7
 
     #
     contacts = compute_assembly_contacts(parts, default_settings)
-    table_insertion, drts = compute_insertion_table(parts, default_settings)
-    table_grasp, grasp_frames, _ = compute_grasp_table(parts, default_settings)
-    succeed, solution, curriculum, policy_dataset = forward_curriculum(parts, contacts, table_insertion, table_grasp, default_settings)
+    #table_insertion, drts = compute_insertion_table(parts, default_settings)
+    #table_grasp, grasp_frames, _ = compute_grasp_table(parts, default_settings)
+    succeed, solution, curriculum, policy_dataset = forward_curriculum(parts, contacts, None, None, default_settings)
     print("succeed:\t", succeed)
 
-    filename = os.path.join(RESOURCE_DIR, "curriculum/tetris-1.pt")
+    filename = os.path.join(RESOURCE_DIR, "curriculum/dome.pt")
 
     input = np.vstack(policy_dataset['input'])
     policy_dataset['input'] = torch.tensor(input, dtype=torch.int32, device="cpu")
@@ -308,6 +311,6 @@ if __name__ == '__main__':
     policy_dataset['output'] = torch.tensor(output, dtype=torch.int32, device="cpu")
     torch.save(policy_dataset, filename)
 
-    init_polyscope()
-    render_sequence(parts, solution, default_settings)
-    ps.show()
+    # init_polyscope()
+    # render_sequence(parts, solution, default_settings)
+    # ps.show()

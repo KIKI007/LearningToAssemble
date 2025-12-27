@@ -408,7 +408,6 @@ def simulate_gurobi(batch_part_states: list[dict],
             residual = (rbe.Jn.T @ λn + rbe.Jt.T @ λt + rbe.g) * ps[:, id]
             velocity = rbe.invM @ residual
             velocity_inf_nrm = np.max(np.abs(velocity), axis=0)
-            print(velocity_inf_nrm)
             if velocity_inf_nrm < rbe.velocity_tol:
                 flags.append(True)
             else:

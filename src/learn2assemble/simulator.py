@@ -25,7 +25,7 @@ def init_ipm(parts: list[Trimesh],
     ipm = update_default_settings(settings,
                                    "ipm",
                                   {
-                                       "ipm_iter": 30,
+                                       "ipm_iter": 20,
                                        "pcg_iter": 50,
                                        "conv_eps": 1E-3,
                                        "pcg_eps": 1E-9,

@@ -26,7 +26,7 @@ def init_ipm(parts: list[Trimesh],
                                    "ipm",
                                   {
                                        "ipm_iter": 20,
-                                       "pcg_iter": 20,
+                                       "pcg_iter": 50,
                                        "conv_eps": 1E-9,
                                        "pcg_eps": 1E-4,
                                        "x_eps": 1E-5,

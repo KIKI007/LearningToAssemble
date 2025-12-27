@@ -478,7 +478,7 @@ if __name__ == '__main__':
     default_settings['rbe']['mu'] = 0.5
     default_settings["assembly"]["contact_shrink_ratio"] = 0.0 # for robustnessly computing the contact surfaces
 
-    n_batch = 512
+    n_batch = 1024
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
     part_states = np.ones((n_batch, len(parts)))
     # part_states[0, :] = 0
@@ -503,8 +503,9 @@ if __name__ == '__main__':
     contacts = compute_assembly_contacts(parts, default_settings)
     timer = perf_counter()
     v_fp32, stable_fp32 = simulate(parts, contacts, part_states, default_settings)
-    # print("avg time:\t", (perf_counter() - timer) / n_batch)
-    # print(np.sum(stable_fp32) / n_batch)
+    print("avg time:\t", (perf_counter() - timer) / n_batch)
+    print(np.sum(stable_fp32) / n_batch)
+
     # t = 0
     # def callback():
     #     global t

@@ -25,7 +25,8 @@ def init_ipm(parts: list[Trimesh],
     ipm = update_default_settings(settings,
                                    "ipm",
                                   {
-                                       "max_iter": 20,
+                                       "ipm_iter": 20,
+                                       "pcg_iter": 50,
                                        "conv_eps": 1E-9,
                                        "pcg_eps": 1E-6,
                                        "x_eps": 1E-5,
@@ -102,7 +103,7 @@ def precond(diagQ, GG, s, z):
 def inf_norm(x):
     return torch.max(torch.abs(x), dim=0).values
 
-def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5):
+def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5, n_iter = 50):
     ZS = z / s
     b = GT @ ((z * v3 - v2) / s) + v1
     if dx is None:
@@ -119,7 +120,7 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5):
     inds = torch.arange(b.shape[1], device=device, dtype=torch.long)
 
     k = 0
-    while inds.shape[0] > 0 and k < 50:
+    while inds.shape[0] > 0 and k < n_iter:
         Apk = GT @ (ZS * (G @ pk)) + Q @ pk
         ru = torch.sum(rk * uk, dim = 0)
         ak =  ru / torch.sum(pk * Apk, dim = 0)
@@ -205,7 +206,7 @@ def simulate_ipm(batch_part_states: list[dict],
     inds = torch.arange(s.shape[1], dtype=torch.long, device=device)
 
     it = 0
-    while it < ipm.max_iter:
+    while it < ipm.ipm_iter:
 
         timer = perf_counter()
         invM = precond(diagQ, GG, s, z)
@@ -227,7 +228,8 @@ def simulate_ipm(batch_part_states: list[dict],
 
         # update
         timer = perf_counter()
-        dx_a, ds_a, dz_a = ipm_solve_rhs(Q, G, GT, s, z, invM, -r1, -r2, -r3, eps = ipm.pcg_eps)
+        dx_a, ds_a, dz_a = ipm_solve_rhs(Q, G, GT, s, z, invM, -r1, -r2, -r3, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
+        print("ipm_solve_rhs", perf_counter() - timer)
         print("ipm_solve_rhs 1", perf_counter() - timer)
 
         timer = perf_counter()
@@ -236,7 +238,7 @@ def simulate_ipm(batch_part_states: list[dict],
         print("centering_params", perf_counter() - timer)
 
         timer = perf_counter()
-        dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM,  -r1, -r2, -r3, dx = dx_a, eps = ipm.pcg_eps)
+        dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM,  -r1, -r2, -r3, dx = dx_a, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
         alpha = 0.99 * linesearch(s, ds, z, dz)
         print("ipm_solve_rhs 2", perf_counter() - timer)
         print("\n")

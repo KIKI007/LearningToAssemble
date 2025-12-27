@@ -27,7 +27,7 @@ def init_ipm(parts: list[Trimesh],
                                   {
                                        "ipm_iter": 20,
                                        "pcg_iter": 100,
-                                       "conv_eps": 1E-3,
+                                       "conv_eps": 1E-2,
                                        "pcg_eps": 1E-9,
                                        "x_eps": 1E-7,
                                        "float_type": torch.float64,

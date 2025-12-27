@@ -6,7 +6,6 @@ from learn2assemble import *
 import polyscope as ps
 import warp as wp
 import time
-from numba import njit, prange
 
 
 @wp.kernel

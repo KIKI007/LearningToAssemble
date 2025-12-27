@@ -472,7 +472,7 @@ if __name__ == '__main__':
     #import polyscope as ps
     import os
 
-    init_polyscope()
+    #init_polyscope()
 
     # test
     default_settings['rbe']['mu'] = 0.5
@@ -503,17 +503,17 @@ if __name__ == '__main__':
     contacts = compute_assembly_contacts(parts, default_settings)
     timer = perf_counter()
     v_fp32, stable_fp32 = simulate(parts, contacts, part_states, default_settings)
-    print("avg time:\t", (perf_counter() - timer) / n_batch)
-    print(np.sum(stable_fp32) / n_batch)
-    t = 0
-    def callback():
-        global t
-        changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
-        if changed:
-            draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-
-
-    draw_contacts(contacts, part_states[0])
-    draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-    ps.set_user_callback(callback)
-    ps.show()
+    # print("avg time:\t", (perf_counter() - timer) / n_batch)
+    # print(np.sum(stable_fp32) / n_batch)
+    # t = 0
+    # def callback():
+    #     global t
+    #     changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
+    #     if changed:
+    #         draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    #
+    #
+    # draw_contacts(contacts, part_states[0])
+    # draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    # ps.set_user_callback(callback)
+    # ps.show()

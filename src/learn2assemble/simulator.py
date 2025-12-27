@@ -120,8 +120,14 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5, n_ite
     inds = torch.arange(b.shape[1], device=device, dtype=torch.long)
 
     k = 0
+    tot_Apk = 0
     while inds.shape[0] > 0 and k < n_iter:
-        Apk = GT @ (ZS * (G @ pk)) + Q @ pk
+        time = perf_counter()
+        Gpk = G @ pk
+        ZSGpk = ZS * Gpk
+        Apk = GT @ ZSGpk + Q @ pk
+        tot_Apk += perf_counter() - time
+
         ru = torch.sum(rk * uk, dim = 0)
         ak =  ru / torch.sum(pk * Apk, dim = 0)
         xk1 = xk + ak * pk
@@ -137,10 +143,10 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5, n_ite
         flag = inf_norm(rk1) > eps
         inds = inds[flag]
         xk, rk, uk, pk = xk1[:, flag], rk1[:, flag], uk1[:, flag], pk1[:, flag]
-
         ZS, invM = ZS[:, flag], invM[:, flag]
         k = k + 1
 
+    print("Apk", tot_Apk)
     #Axb = (GT @ ((z / s) * (G @ dx)) + Q @ dx - b)
     #print('solve in \t', k, "/", Q.shape[0], " steps, \t res = ", torch.max(inf_norm(Axb), 0).values)
 
@@ -229,8 +235,7 @@ def simulate_ipm(batch_part_states: list[dict],
         # update
         timer = perf_counter()
         dx_a, ds_a, dz_a = ipm_solve_rhs(Q, G, GT, s, z, invM, -r1, -r2, -r3, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
-        print("ipm_solve_rhs", perf_counter() - timer)
-        print("ipm_solve_rhs 1", perf_counter() - timer)
+        print("ipm_solve_rhs_1", perf_counter() - timer)
 
         timer = perf_counter()
         sigma, mu = centering_params(s, z, ds_a, dz_a)
@@ -240,7 +245,7 @@ def simulate_ipm(batch_part_states: list[dict],
         timer = perf_counter()
         dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM,  -r1, -r2, -r3, dx = dx_a, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
         alpha = 0.99 * linesearch(s, ds, z, dz)
-        print("ipm_solve_rhs 2", perf_counter() - timer)
+        print("ipm_solve_rhs_2", perf_counter() - timer)
         print("\n")
         x = x + alpha * dx
         s = s + alpha * ds

@@ -144,8 +144,8 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5):
         ZS, invM = ZS[:, flag], invM[:, flag]
         k = k + 1
 
-    #Axb = (GT @ ((z / s) * (G @ dx)) + Q @ dx - b)
-    #print('solve in \t', k, " steps ,\t res = ", torch.max(inf_norm(Axb), 0).values)
+    Axb = (GT @ ((z / s) * (G @ dx)) + Q @ dx - b)
+    print('solve in \t', k, " steps ,\t res = ", torch.max(inf_norm(Axb), 0).values)
 
     ds = v3 - G @ dx
     dz = (v2 - z * ds) / s

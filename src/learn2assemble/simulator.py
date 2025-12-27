@@ -489,7 +489,7 @@ if __name__ == '__main__':
     part_states = torch.load(filename)['input']
     part_states = part_states[torch.randperm(part_states.shape[0]), :]
     print(part_states.shape)
-    n_batch = 512
+    n_batch = 2048
     part_states = part_states[:n_batch, :]
 
     default_settings['rbe']['Ccp'] = 100

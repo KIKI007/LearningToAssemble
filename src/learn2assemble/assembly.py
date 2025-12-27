@@ -230,9 +230,10 @@ if __name__ == '__main__':
 
     init_polyscope()
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
-    part_states = np.ones(len(parts))
+    part_states = np.zeros(len(parts))
+    part_states[3] = 1
+    part_states[5] = 1
     part_states[0] = 2
-    part_states[3] = 0
     contacts = compute_assembly_contacts(parts, default_settings)
     draw_contacts(contacts, part_states, enable=True)
     draw_assembly(parts, part_states)

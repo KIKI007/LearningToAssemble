@@ -477,10 +477,10 @@ if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings, RESOURCE_DIR
     from learn2assemble.render import *
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    import polyscope as ps
-    import os
-
-    init_polyscope()
+    # import polyscope as ps
+    # import os
+    #
+    # init_polyscope()
 
     # test
     default_settings["rbe"]["density"] = 100
@@ -522,8 +522,8 @@ if __name__ == '__main__':
         if changed:
             draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
 
-
-    draw_contacts(contacts, part_states[0])
-    draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-    ps.set_user_callback(callback)
-    ps.show()
+    #
+    # draw_contacts(contacts, part_states[0])
+    # draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    # ps.set_user_callback(callback)
+    # ps.show()

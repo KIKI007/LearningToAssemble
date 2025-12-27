@@ -25,10 +25,10 @@ def init_ipm(parts: list[Trimesh],
     ipm = update_default_settings(settings,
                                    "ipm",
                                   {
-                                       "ipm_iter": 20,
+                                       "ipm_iter": 30,
                                        "pcg_iter": 50,
-                                       "conv_eps": 1E-9,
-                                       "pcg_eps": 1E-4,
+                                       "conv_eps": 1E-5,
+                                       "pcg_eps": 1E-9,
                                        "x_eps": 1E-5,
                                        "float_type": torch.float64,
                                    })
@@ -120,7 +120,6 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5, n_ite
     inds = torch.arange(b.shape[1], device=device, dtype=torch.long)
 
     k = 0
-    tot_Apk = 0
     while inds.shape[0] > 0 and k < n_iter:
         Gpk = G @ pk
         ZSGpk = ZS * Gpk
@@ -239,12 +238,16 @@ def simulate_ipm(batch_part_states: list[dict],
 
         timer = perf_counter()
         sigma, mu = centering_params(s, z, ds_a, dz_a)
-        r2 = r2 - (sigma * mu - (ds_a * dz_a))
+        r2 = (sigma * mu - (ds_a * dz_a))
         torch.cuda.synchronize()
         print("centering_params", perf_counter() - timer)
 
         timer = perf_counter()
-        dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM,  -r1, -r2, -r3, dx = dx_a, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
+        dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM, 0, r2, 0, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter / 2)
+        dx += dx_a
+        ds += ds_a
+        dz += dz_a
+
         alpha = 0.99 * linesearch(s, ds, z, dz)
         torch.cuda.synchronize()
         print("ipm_solve_rhs_2", perf_counter() - timer)
@@ -475,15 +478,16 @@ if __name__ == '__main__':
     from learn2assemble.render import *
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     import polyscope as ps
-    # import os
-    #
-    # init_polyscope()
+    import os
+
+    init_polyscope()
 
     # test
+    default_settings["rbe"]["density"] = 1E3
     default_settings['rbe']['mu'] = 0.5
     default_settings["assembly"]["contact_shrink_ratio"] = 0.0 # for robustnessly computing the contact surfaces
 
-    n_batch = 1024
+    n_batch = 8
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
     part_states = np.ones((n_batch, len(parts)))
     # part_states[0, :] = 0
@@ -501,7 +505,7 @@ if __name__ == '__main__':
 
     # part_states = part_states[:n_batch, :]
 
-    default_settings['rbe']['Ccp'] = 100
+    default_settings['rbe']['Ccp'] = 1000
     default_settings.pop('admm', None)
     #default_settings['gurobi'] = {}
     default_settings['ipm'] = {}
@@ -519,7 +523,7 @@ if __name__ == '__main__':
             draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
 
 
-    # draw_contacts(contacts, part_states[0])
-    # draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-    # ps.set_user_callback(callback)
-    # ps.show()
+    draw_contacts(contacts, part_states[0])
+    draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    ps.set_user_callback(callback)
+    ps.show()

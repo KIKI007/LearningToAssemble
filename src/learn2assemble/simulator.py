@@ -467,50 +467,53 @@ def simulate(parts: list[Trimesh],
 
 if __name__ == '__main__':
     from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings, RESOURCE_DIR
-    #from learn2assemble.render import *
+    from learn2assemble.render import *
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
     #import polyscope as ps
     import os
 
-    #init_polyscope()
+    init_polyscope()
 
     # test
-    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
-    part_states = np.ones((2, len(parts)))
-    part_states[0, :] = 0
-    part_states[0, 3] = 1
-    part_states[0, 5] = 1
-    part_states[0, 0] = 2
-    part_states[:, 0] = 2
+    default_settings['rbe']['mu'] = 0.5
+    default_settings["assembly"]["contact_shrink_ratio"] = 0.0 # for robustnessly computing the contact surfaces
+
+    n_batch = 512
+    parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/dome")
+    part_states = np.ones((n_batch, len(parts)))
+    # part_states[0, :] = 0
+    # part_states[0, 3] = 1
+    # part_states[0, 5] = 1
+    # part_states[0, 0] = 2
+    part_states[:, -1] = 2
 
     # test dataset
-    torch.manual_seed(0)
-    filename = os.path.join(RESOURCE_DIR, "curriculum/tetris-1.pt")
-    part_states = torch.load(filename)['input']
-    part_states = part_states[torch.randperm(part_states.shape[0]), :]
-    print(part_states.shape)
-    n_batch = 2048
-    part_states = part_states[:n_batch, :]
+    # torch.manual_seed(0)
+    # filename = os.path.join(RESOURCE_DIR, "curriculum/tetris-1.pt")
+    # part_states = torch.load(filename)['input']
+    # part_states = part_states[torch.randperm(part_states.shape[0]), :]
+    # print(part_states.shape)
+
+    # part_states = part_states[:n_batch, :]
 
     default_settings['rbe']['Ccp'] = 100
-    default_settings["assembly"]["contact_shrink_ratio"] = 0.1 # for robustnessly computing the contact surfaces
     default_settings.pop('admm', None)
+    #default_settings['gurobi'] = {}
     default_settings['ipm'] = {}
     contacts = compute_assembly_contacts(parts, default_settings)
     timer = perf_counter()
     v_fp32, stable_fp32 = simulate(parts, contacts, part_states, default_settings)
     print("avg time:\t", (perf_counter() - timer) / n_batch)
-    print(np.sum(stable_fp32))
     print(np.sum(stable_fp32) / n_batch)
-    # t = 0
-    # def callback():
-    #     global t
-    #     changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
-    #     if changed:
-    #         draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    t = 0
+    def callback():
+        global t
+        changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
+        if changed:
+            draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
 
-    #
-    # draw_contacts(contacts, part_states[0])
-    # draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-    # ps.set_user_callback(callback)
-    # ps.show()
+
+    draw_contacts(contacts, part_states[0])
+    draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    ps.set_user_callback(callback)
+    ps.show()

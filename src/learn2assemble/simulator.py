@@ -83,17 +83,19 @@ def ipm_kkt_res(Q, q, h, G, GT, x, s, z):
 
 def precond(diagQ, G, GT, s, z):
     ZS = z / s
-    # ZSG = torch.einsum('ib, ij -> bij', ZS, G)
-    # invM = torch.einsum('ij, bji -> ib', G.T, ZSG)
+    # ZSG = torch.einsum('ib, ij -> bij', ZS, G.to_dense())
+    # invM = torch.einsum('ij, bji -> ib', G.T.to_dense(), ZSG)
     # invM = invM + diagQ[:, None]
     # invM = 1.0 / invM
-
+    time = perf_counter()
     nbatch = z.shape[1]
     invM2 = torch.zeros(diagQ.shape[0], nbatch, device=s.device, dtype=s.dtype)
     for i in range(nbatch):
-        ZSi = torch.diag(ZS[:, i], 0)
-        invM2[:, i] = 1.0 / (torch.diagonal(GT @ ZSi @ G) + diagQ)
+        ZSG = torch.einsum('i, ij -> ij', ZS[:, i], G)
+        GTZSG = torch.sum(G * ZSG, dim = 0).to_dense()
+        invM2[:, i] = 1.0 / (GTZSG + diagQ)
     #print(torch.linalg.norm(invM - invM2))
+    print((perf_counter() - time) / 1024)
     return invM2
 
 def inf_norm(x):
@@ -473,7 +475,7 @@ if __name__ == '__main__':
     part_states = torch.load(filename)['input']
     part_states = part_states[torch.randperm(part_states.shape[0]), :]
     print(part_states.shape)
-    n_batch = 2048
+    n_batch = 1024
     part_states = part_states[:n_batch, :]
 
     default_settings['rbe']['Ccp'] = 100

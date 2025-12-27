@@ -215,7 +215,7 @@ def simulate_ipm(batch_part_states: list[dict],
         timer = perf_counter()
         r1, r2, r3, kkt_res = ipm_kkt_res(Q, q, h, G, GT, x, s, z)
         print("ipm_kkt_res", perf_counter() - timer)
-        #print("kkt_res", kkt_res)
+        print("kkt_res", torch.max(kkt_res, 0).values)
 
         # remove converged
         flag = kkt_res > ipm.conv_eps

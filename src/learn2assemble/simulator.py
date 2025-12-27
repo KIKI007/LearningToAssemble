@@ -140,8 +140,8 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5):
         ZS, invM = ZS[:, flag], invM[:, flag]
         k = k + 1
 
-    Axb = (GT @ ((z / s) * (G @ dx)) + Q @ dx - b)
-    print('solve in \t', k, "/", Q.shape[0], " steps, \t res = ", torch.max(inf_norm(Axb), 0).values)
+    #Axb = (GT @ ((z / s) * (G @ dx)) + Q @ dx - b)
+    #print('solve in \t', k, "/", Q.shape[0], " steps, \t res = ", torch.max(inf_norm(Axb), 0).values)
 
     ds = v3 - G @ dx
     dz = (v2 - z * ds) / s
@@ -214,7 +214,7 @@ def simulate_ipm(batch_part_states: list[dict],
         timer = perf_counter()
         r1, r2, r3, kkt_res = ipm_kkt_res(Q, q, h, G, GT, x, s, z)
         print("ipm_kkt_res", perf_counter() - timer)
-        print("kkt_res", kkt_res)
+        #print("kkt_res", kkt_res)
 
         # remove converged
         flag = kkt_res > ipm.conv_eps

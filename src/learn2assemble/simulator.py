@@ -83,21 +83,20 @@ def ipm_kkt_res(Q, q, h, G, GT, x, s, z):
 
 def precond(diagQ, G, GT, s, z):
     ZS = z / s
-    time = perf_counter()
-    ZSG = torch.einsum('ib, ij -> bij', ZS, G.to_dense())
-    invM = torch.einsum('ij, bji -> ib', G.T.to_dense(), ZSG)
-    invM = invM + diagQ[:, None]
-    invM = 1.0 / invM
+    # ZSG = torch.einsum('ib, ij -> bij', ZS, G)
+    # invM = torch.einsum('ij, bji -> ib', G.T, ZSG)
+    # invM = invM + diagQ[:, None]
+    # invM = 1.0 / invM
 
-    # nbatch = z.shape[1]
-    # invM2 = torch.zeros(diagQ.shape[0], nbatch, device=s.device, dtype=s.dtype)
-    # for i in range(nbatch):
-    #     ZSG = torch.einsum('i, ij -> ij', ZS[:, i], G)
-    #     GTZSG = torch.sum(G * ZSG, dim = 0).to_dense()
-    #     invM2[:, i] = 1.0 / (GTZSG + diagQ)
+    nbatch = z.shape[1]
+    invM2 = torch.zeros(diagQ.shape[0], nbatch, device=s.device, dtype=s.dtype)
+    for i in range(nbatch):
+        ZSG = torch.einsum('i, ij -> ij', ZS[:, i], G)
+        GTZSG = torch.sum(G * ZSG, dim = 0).to_dense()
+        invM2[:, i] = 1.0 / (GTZSG + diagQ)
     #print(torch.linalg.norm(invM - invM2))
-    print((perf_counter() - time) / 1024)
-    return invM
+    # print((perf_counter() - time) / 1024)
+    return invM2
 
 def inf_norm(x):
     return torch.max(torch.abs(x), dim=0).values
@@ -210,8 +209,13 @@ def simulate_ipm(batch_part_states: list[dict],
     it = 0
     while it < ipm.max_iter:
 
+        timer = perf_counter()
         invM = precond(diagQ, G, GT, s, z)
+        print("precond", perf_counter() - timer)
+
+        timer = perf_counter()
         r1, r2, r3, kkt_res = ipm_kkt_res(Q, q, h, G, GT, x, s, z)
+        print("ipm_kkt_res", perf_counter() - timer)
         #print("kkt_res", kkt_res)
 
         # remove converged
@@ -224,12 +228,20 @@ def simulate_ipm(batch_part_states: list[dict],
             break
 
         # update
+        timer = perf_counter()
         dx_a, ds_a, dz_a = ipm_solve_rhs(Q, G, GT, s, z, invM, -r1, -r2, -r3, eps = ipm.pcg_eps)
+        print("ipm_solve_rhs 1", perf_counter() - timer)
+
+        timer = perf_counter()
         sigma, mu = centering_params(s, z, ds_a, dz_a)
         r2 = r2 - (sigma * mu - (ds_a * dz_a))
+        print("centering_params", perf_counter() - timer)
+
+        timer = perf_counter()
         dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM,  -r1, -r2, -r3, dx = dx_a, eps = ipm.pcg_eps)
         alpha = 0.99 * linesearch(s, ds, z, dz)
-
+        print("ipm_solve_rhs 2", perf_counter() - timer)
+        print("\n")
         x = x + alpha * dx
         s = s + alpha * ds
         z = z + alpha * dz
@@ -470,7 +482,6 @@ if __name__ == '__main__':
     part_states[:, 0] = 2
 
     # test dataset
-
     torch.manual_seed(0)
     filename = os.path.join(RESOURCE_DIR, "curriculum/tetris-1.pt")
     part_states = torch.load(filename)['input']

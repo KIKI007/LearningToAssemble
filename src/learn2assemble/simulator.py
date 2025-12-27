@@ -122,11 +122,10 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5, n_ite
     k = 0
     tot_Apk = 0
     while inds.shape[0] > 0 and k < n_iter:
-        time = perf_counter()
         Gpk = G @ pk
         ZSGpk = ZS * Gpk
-        Apk = GT @ ZSGpk + Q @ pk
-        tot_Apk += perf_counter() - time
+        Apk = GT @ ZSGpk
+        Apk += Q @ pk
 
         ru = torch.sum(rk * uk, dim = 0)
         ak =  ru / torch.sum(pk * Apk, dim = 0)
@@ -146,7 +145,6 @@ def ipm_solve_rhs(Q, G, GT, s, z, invM, v1, v2, v3, dx = None, eps = 1E-5, n_ite
         ZS, invM = ZS[:, flag], invM[:, flag]
         k = k + 1
 
-    print("Apk", tot_Apk)
     #Axb = (GT @ ((z / s) * (G @ dx)) + Q @ dx - b)
     #print('solve in \t', k, "/", Q.shape[0], " steps, \t res = ", torch.max(inf_norm(Axb), 0).values)
 
@@ -220,6 +218,7 @@ def simulate_ipm(batch_part_states: list[dict],
 
         timer = perf_counter()
         r1, r2, r3, kkt_res = ipm_kkt_res(Q, q, h, G, GT, x, s, z)
+        torch.cuda.synchronize()
         print("ipm_kkt_res", perf_counter() - timer)
         print("kkt_res", torch.max(kkt_res, 0).values)
 
@@ -235,16 +234,19 @@ def simulate_ipm(batch_part_states: list[dict],
         # update
         timer = perf_counter()
         dx_a, ds_a, dz_a = ipm_solve_rhs(Q, G, GT, s, z, invM, -r1, -r2, -r3, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
+        torch.cuda.synchronize()
         print("ipm_solve_rhs_1", perf_counter() - timer)
 
         timer = perf_counter()
         sigma, mu = centering_params(s, z, ds_a, dz_a)
         r2 = r2 - (sigma * mu - (ds_a * dz_a))
+        torch.cuda.synchronize()
         print("centering_params", perf_counter() - timer)
 
         timer = perf_counter()
         dx, ds, dz = ipm_solve_rhs(Q, G, GT, s, z, invM,  -r1, -r2, -r3, dx = dx_a, eps = ipm.pcg_eps, n_iter = ipm.pcg_iter)
         alpha = 0.99 * linesearch(s, ds, z, dz)
+        torch.cuda.synchronize()
         print("ipm_solve_rhs_2", perf_counter() - timer)
         print("\n")
         x = x + alpha * dx

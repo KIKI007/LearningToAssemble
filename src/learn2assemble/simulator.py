@@ -448,13 +448,13 @@ def simulate(parts: list[Trimesh],
 
 
 if __name__ == '__main__':
-    from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings
-    from learn2assemble.render import *
+    from learn2assemble import ASSEMBLY_RESOURCE_DIR, default_settings, RESOURCE_DIR
+    #from learn2assemble.render import *
     from learn2assemble.assembly import load_assembly_from_files, compute_assembly_contacts
-    import polyscope as ps
+    #import polyscope as ps
     import os
 
-    init_polyscope()
+    #init_polyscope()
 
     # test
     parts = load_assembly_from_files(ASSEMBLY_RESOURCE_DIR + "/tetris-1")
@@ -481,15 +481,15 @@ if __name__ == '__main__':
     v_fp32, stable_fp32 = simulate(parts, contacts, part_states, default_settings)
     print(np.sum(stable_fp32))
     print(np.sum(stable_fp32) / n_batch)
-    t = 0
-    def callback():
-        global t
-        changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
-        if changed:
-            draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    # t = 0
+    # def callback():
+    #     global t
+    #     changed, t = psim.SliderFloat("time", v=t, v_min=0, v_max=1)
+    #     if changed:
+    #         draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
 
-
-    draw_contacts(contacts, part_states[0])
-    draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
-    ps.set_user_callback(callback)
-    ps.show()
+    #
+    # draw_contacts(contacts, part_states[0])
+    # draw_assembly_motion(parts, part_states[0], v_fp32[:, 0] * t)
+    # ps.set_user_callback(callback)
+    # ps.show()

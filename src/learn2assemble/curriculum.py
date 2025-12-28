@@ -290,7 +290,7 @@ if __name__ == '__main__':
     default_settings["assembly"]["contact_shrink_ratio"] = 0.0 # for robustnessly computing the contact surfaces
     default_settings['curriculum']['n_beam'] = 128
     default_settings.pop('admm')
-    default_settings['ipm'] = {}
+    default_settings['gurobi'] = {}
     default_settings["env"]["boundary_part_ids"] = [len(parts) - 1]
 
     # debug
